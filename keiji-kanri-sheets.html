@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>経費ノート v2</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap');
+:root {
+  --bg:#f4f2ee;--surface:#fff;--surface2:#faf9f7;--border:#e2ddd7;
+  --accent:#2d6a4f;--accent2:#52b788;--accent-light:#d8f3dc;
+  --orange:#e07a2f;--orange-light:#fdebd0;
+  --text:#1a1a1a;--text2:#5a5650;--text3:#9a9490;
+  --red:#c0392b;--red-light:#fdecea;--blue:#1e40af;--blue-light:#dbeafe;
+  --purple:#6d28d9;--purple-light:#ede9fe;
+  --shadow:0 2px 12px rgba(0,0,0,.07);--shadow-lg:0 8px 32px rgba(0,0,0,.10);
+  --radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;}
+
+/* SETUP */
+#setup-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.setup-card{background:var(--surface);border-radius:16px;padding:32px 28px;max-width:520px;width:100%;box-shadow:var(--shadow-lg);border:1px solid var(--border);}
+.setup-logo{font-size:44px;text-align:center;margin-bottom:8px;}
+.setup-title{font-size:22px;font-weight:700;text-align:center;margin-bottom:4px;}
+.setup-sub{font-size:13px;color:var(--text3);text-align:center;margin-bottom:22px;}
+.step-list{list-style:none;counter-reset:steps;margin-bottom:22px;}
+.step-list li{counter-increment:steps;padding:11px 11px 11px 44px;position:relative;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6;}
+.step-list li:last-child{border-bottom:none;}
+.step-list li::before{content:counter(steps);position:absolute;left:8px;top:11px;width:24px;height:24px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
+.step-list li strong{color:var(--accent);}
+.step-list li code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;}
+
+/* HEADER */
+header{background:var(--accent);color:#fff;padding:0 16px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+.sync-badge{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:700;background:rgba(255,255,255,.2);cursor:pointer;white-space:nowrap;}
+.sync-badge.error{background:rgba(255,80,80,.4);}
+
+/* TABS */
+.main-tabs{display:flex;background:var(--surface);border-bottom:2px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.main-tabs::-webkit-scrollbar{display:none;}
+.main-tab{padding:12px 14px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit;transition:all .2s;flex-shrink:0;}
+.main-tab:hover{color:var(--accent);background:var(--accent-light);}
+.main-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:700;}
+
+/* CONTENT */
+.content{padding:14px;max-width:880px;margin:0 auto;}
+.section{display:none;}.section.active{display:block;}
+
+/* CARD */
+.card{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;box-shadow:var(--shadow);border:1px solid var(--border);}
+.card-title{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+
+/* SUMMARY GRID */
+.summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}
+@media(min-width:600px){.summary-grid{grid-template-columns:repeat(4,1fr);}}
+.stat-box{background:var(--surface2);border-radius:10px;padding:12px;border:1px solid var(--border);text-align:center;}
+.stat-label{font-size:11px;color:var(--text3);margin-bottom:3px;}
+.stat-value{font-family:'DM Mono',monospace;font-size:17px;font-weight:500;}
+.red{color:var(--red);}.orange{color:var(--orange);}.green{color:var(--accent);}.blue{color:var(--blue);}.purple{color:var(--purple);}
+
+/* FORM */
+.form-grid{display:grid;gap:10px;}
+@media(min-width:600px){.form-grid{grid-template-columns:repeat(2,1fr);}}
+.form-group{display:flex;flex-direction:column;gap:5px;}
+.form-group.full{grid-column:1/-1;}
+label{font-size:12px;font-weight:500;color:var(--text2);}
+.req{color:var(--red);}
+input,select,textarea{padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);color:var(--text);transition:border-color .2s;width:100%;}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent2);background:#fff;}
+textarea{resize:vertical;min-height:52px;}
+.hint{font-size:11px;color:var(--text3);margin-top:2px;}
+
+/* BUTTONS */
+.btn{padding:9px 16px;border-radius:8px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;border:none;transition:all .2s;display:inline-flex;align-items:center;gap:6px;}
+.btn-primary{background:var(--accent);color:#fff;}.btn-primary:hover{background:#1e4d38;}.btn-primary:disabled{background:#9a9490;cursor:not-allowed;}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1.5px solid var(--border);}
+.btn-danger{background:var(--red-light);color:var(--red);border:none;}.btn-danger:hover{background:var(--red);color:#fff;}
+.btn-warning{background:var(--orange-light);color:var(--orange);border:none;}.btn-warning:hover{background:var(--orange);color:#fff;}
+.btn-sm{padding:5px 10px;font-size:12px;}
+.btn-orange{background:var(--orange);color:#fff;}.btn-orange:disabled{background:#9a9490;cursor:not-allowed;}
+.btn-blue{background:var(--blue);color:#fff;}.btn-blue:disabled{background:#9a9490;cursor:not-allowed;}
+.btn-purple{background:var(--purple);color:#fff;}
+
+/* TABLE */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;min-width:500px;}
+th{background:var(--surface2);padding:9px 11px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--border);}
+td{padding:9px 11px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
+.amount-cell{font-family:'DM Mono',monospace;text-align:right;font-weight:500;}
+
+/* BADGE */
+.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:11px;font-weight:700;}
+.bg{background:var(--accent-light);color:var(--accent);}
+.bo{background:var(--orange-light);color:var(--orange);}
+.bb{background:var(--blue-light);color:var(--blue);}
+.bgr{background:var(--surface2);color:var(--text3);border:1px solid var(--border);}
+.bpu{background:var(--purple-light);color:var(--purple);}
+.br{background:var(--red-light);color:var(--red);}
+
+/* ALERT */
+.alert{padding:10px 13px;border-radius:8px;font-size:13px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start;}
+.ai{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;}
+.aw{background:var(--orange-light);border:1px solid #fcd34d;color:#92400e;}
+.as{background:var(--accent-light);border:1px solid var(--accent2);color:var(--accent);}
+.ar{background:var(--red-light);border:1px solid #fca5a5;color:var(--red);}
+
+/* FILTER */
+.filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.filter-btn{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-family:inherit;}
+.filter-btn.active,.filter-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+/* EMPTY */
+.empty-state{text-align:center;padding:32px 16px;color:var(--text3);}
+.empty-state .ei{font-size:34px;margin-bottom:8px;}
+
+/* LOADING */
+.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:center;z-index:300;flex-direction:column;gap:12px;}
+.spinner{width:34px;height:34px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* 按分 */
+.按分card{background:linear-gradient(135deg,#f0faf4,#e8f5e9);border:2px solid var(--accent2);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+.按分row{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:10px;}
+@media(max-width:599px){.按分row{grid-template-columns:1fr 1fr;}}
+.按分result{background:#fff;border-radius:8px;padding:10px 14px;font-size:13px;border:1px solid var(--accent2);margin-top:4px;}
+
+/* YEAR ROW */
+.year-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+.year-row label{font-size:13px;font-weight:500;color:var(--text2);}
+.year-row select{width:auto;}
+
+/* BREAKDOWN BAR */
+.bkdown-item{display:flex;align-items:center;gap:10px;padding:8px 11px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-bottom:5px;}
+.bkdown-bar-wrap{flex:1;background:var(--border);border-radius:4px;height:5px;overflow:hidden;}
+.bkdown-bar{height:100%;background:var(--accent2);border-radius:4px;}
+.bkdown-name{width:120px;font-size:12px;font-weight:500;color:var(--text2);flex-shrink:0;}
+.bkdown-amt{font-family:'DM Mono',monospace;font-size:12px;width:85px;text-align:right;flex-shrink:0;}
+
+/* MODAL */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;}
+.modal{background:var(--surface);border-radius:16px;padding:24px;max-width:540px;width:100%;box-shadow:var(--shadow-lg);max-height:90vh;overflow-y:auto;}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
+.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text3);padding:0 4px;}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loading" style="display:none">
+  <div class="spinner"></div>
+  <div style="font-size:14px;color:var(--text2)" id="loading-msg">読み込み中…</div>
+</div>
+
+<!-- SETUP -->
+<div id="setup-screen">
+<div class="setup-card">
+  <div class="setup-logo">📒</div>
+  <div class="setup-title">経費ノート v2</div>
+  <div class="setup-sub">Googleスプレッドシートと連携・青色申告対応</div>
+  <ol class="step-list">
+    <li>既存の「経費ノート」スプレッドシートを開く（または新規作成）</li>
+    <li>メニュー「<strong>拡張機能</strong>」→「<strong>Apps Script</strong>」を開く</li>
+    <li>既存コードを全部消して <code>gas-code.gs</code> の内容を貼り付けて<strong>保存</strong></li>
+    <li>「<strong>デプロイ</strong>」→「新しいデプロイ」→ 種類：<strong>ウェブアプリ</strong>・実行：<strong>自分</strong>・アクセス：<strong>全員</strong> → 承認する</li>
+    <li>表示された <strong>ウェブアプリのURL</strong>（<code>https://script.google.com/macros/s/...</code>）を下に貼り付ける</li>
+  </ol>
+  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+    <label style="font-size:13px;font-weight:700">ウェブアプリのURL <span class="req">*</span></label>
+    <input type="url" id="gas-url-input" placeholder="https://script.google.com/macros/s/...">
+    <div class="hint">このURLはブラウザに保存されます。スマホ・PCで同じURLを使えば同じデータにアクセスできます。</div>
+  </div>
+  <button class="btn btn-primary" style="width:100%;justify-content:center;font-size:15px" onclick="connectGAS()">🔗 接続して始める</button>
+  <div style="margin-top:12px;padding:10px;background:var(--orange-light);border-radius:8px;font-size:12px;color:#92400e">
+    ⚠️ <strong>既存データは消えません</strong>。GASを更新しても「経費ノート」シートのデータはそのまま保持されます。
+  </div>
+</div>
+</div>
+
+<!-- APP -->
+<div id="app-screen" style="display:none">
+<header>
+  <div>
+    <div style="font-size:15px;font-weight:700">📒 経費ノート v2</div>
+    <div style="font-size:10px;opacity:.7" id="header-sub">青色申告・副業・個人事業主向け</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span class="sync-badge" id="sync-status" onclick="loadData()">⟳ 同期中</span>
+    <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:none;font-size:11px" onclick="resetSetup()">⚙️ 設定</button>
+  </div>
+</header>
+
+<div class="main-tabs">
+  <button class="main-tab active" onclick="showSection('dashboard',this)">🏠 ホーム</button>
+  <button class="main-tab" onclick="showSection('add',this)">＋ 経費入力</button>
+  <button class="main-tab" onclick="showSection('income',this)">💰 収入</button>
+  <button class="main-tab" onclick="showSection('list',this)">📋 一覧</button>
+  <button class="main-tab" onclick="showSection('kaigyohi',this)">🌱 開業費</button>
+  <button class="main-tab" onclick="showSection('按分',this)">🏠 家事按分</button>
+  <button class="main-tab" onclick="showSection('deprec',this)">📦 減価償却</button>
+  <button class="main-tab" onclick="showSection('report',this)">📊 集計</button>
+  <button class="main-tab" onclick="showSection('guide',this)">📖 科目ガイド</button>
+</div>
+
+<div class="content">
+
+<!-- DASHBOARD -->
+<div id="section-dashboard" class="section active">
+  <div class="year-row">
+    <label>表示年度：</label>
+    <select id="dashYear" onchange="renderDashboard()">
+      <option value="2024">2024年</option>
+      <option value="2025">2025年</option>
+      <option value="2026" selected>2026年</option>
+      <option value="2027">2027年</option>
+    </select>
+    <button class="btn btn-secondary btn-sm" onclick="loadData()">🔄 最新に更新</button>
+  </div>
+  <div class="summary-grid">
+    <div class="stat-box"><div class="stat-label">経費合計（按分後）</div><div class="stat-value red" id="s-total">¥0</div></div>
+    <div class="stat-box"><div class="stat-label">収入・補助金合計</div><div class="stat-value blue" id="s-income">¥0</div></div>
+    <div class="stat-box"><div class="stat-label">開業費合計</div><div class="stat-value orange" id="s-k">¥0</div></div>
+    <div class="stat-box"><div class="stat-label">減価償却（年間）</div><div class="stat-value purple" id="s-deprec">¥0</div></div>
+  </div>
+  <div class="card"><div class="card-title">🗂 科目別内訳</div><div id="breakdown-list"></div></div>
+  <div class="card"><div class="card-title">🕐 最近の入力</div><div id="recent-list"></div></div>
+</div>
+
+<!-- ADD RECORD -->
+<div id="section-add" class="section">
+  <div class="card">
+    <div class="card-title" id="add-form-title">✏️ 経費を入力する</div>
+    <div class="alert aw">📌 <div>レシート・領収書は必ず保管！青色申告は<strong>7年間</strong>の保存義務があります。</div></div>
+    <input type="hidden" id="edit-record-id">
+    <div class="form-grid">
+      <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="i-date"></div>
+      <div class="form-group"><label>金額（円）<span class="req">*</span></label><input type="number" id="i-amount" placeholder="例：5500" min="0" oninput="updateAmountPreview()"></div>
+      <div class="form-group">
+        <label>勘定科目 <span class="req">*</span></label>
+        <select id="i-cat" onchange="onCatChange()">
+          <option value="">-- 選択してください --</option>
+          <optgroup label="💻 AIツール・サブスク（全額経費）">
+            <option value="通信費_AI">🤖 AIサービス（ChatGPT・Claude等）</option>
+            <option value="諸会費_デザイン">🎨 デザインツール（Adobe・Canva等）</option>
+            <option value="諸会費_クラウド">☁️ クラウドツール（Notion・Dropbox等）</option>
+            <option value="通信費_ドメイン">🌐 ドメイン・サーバー代</option>
+          </optgroup>
+          <optgroup label="🏠 家事按分（割合自動計算）">
+            <option value="地代家賃_按分">🏠 家賃（按分）</option>
+            <option value="水道光熱費_按分">💡 電気代（按分）</option>
+            <option value="通信費_按分_net">🌐 インターネット代（按分）</option>
+            <option value="通信費_按分_phone">📱 スマホ代（按分）</option>
+          </optgroup>
+          <optgroup label="🚗 車関係">
+            <option value="旅費交通費_車">⛽ ガソリン代</option>
+            <option value="地代家賃_駐車場">🅿️ 駐車場代</option>
+            <option value="損害保険料_車">🛡 自動車保険（事業用分）</option>
+            <option value="車両費">🔧 車検・修理・維持費</option>
+          </optgroup>
+          <optgroup label="📦 よく使う">
+            <option value="消耗品費">✏️ 消耗品費</option>
+            <option value="旅費交通費">🚃 旅費交通費（電車・バス等）</option>
+            <option value="接待交際費">🍽 接待交際費</option>
+            <option value="広告宣伝費">📣 広告宣伝費</option>
+            <option value="工具器具備品">💻 工具器具備品（10万以上→減価償却へ）</option>
+            <option value="外注工賃">👤 外注工賃</option>
+            <option value="支払手数料">💳 支払手数料</option>
+            <option value="諸会費">📋 諸会費</option>
+            <option value="研修費">📚 研修費・セミナー代</option>
+            <option value="新聞図書費">📰 新聞図書費</option>
+            <option value="損害保険料">🛡 損害保険料</option>
+            <option value="通信費">📶 通信費（その他）</option>
+            <option value="租税公課">🏛 租税公課</option>
+            <option value="雑費">📎 雑費</option>
+          </optgroup>
+        </select>
+        <div class="hint" id="cat-hint"></div>
+      </div>
+      <div class="form-group"><label>内容・摘要 <span class="req">*</span></label><input type="text" id="i-memo" placeholder="例：ChatGPT Plus 月額・電車代（渋谷→新宿）"></div>
+      <div class="form-group">
+        <label>支払方法</label>
+        <select id="i-pay">
+          <option value="クレジットカード" selected>クレジットカード</option>
+          <option value="現金">現金</option>
+          <option value="銀行振込">銀行振込</option>
+          <option value="電子マネー">電子マネー・QR決済</option>
+          <option value="口座引落">口座引落（サブスク等）</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>事業使用割合（按分）</label>
+        <select id="i-ratio" onchange="updateAmountPreview()">
+          <option value="100">100%（全額事業用）</option>
+          <option value="80">80%</option>
+          <option value="50">50%</option>
+          <option value="30">30%</option>
+          <option value="20">20%</option>
+          <option value="custom">手入力</option>
+        </select>
+        <div class="hint" id="ratio-hint"></div>
+      </div>
+      <div class="form-group" id="custom-ratio-wrap" style="display:none">
+        <label>按分割合（%）</label>
+        <input type="number" id="i-ratio-custom" placeholder="例：20" min="1" max="100" oninput="updateAmountPreview()">
+      </div>
+      <div class="form-group full"><label>メモ（任意）</label><textarea id="i-note" placeholder="なぜ事業用か・相手先など。税務調査の際に役立ちます"></textarea></div>
+    </div>
+    <div id="amount-preview" style="margin-top:10px;padding:10px 14px;background:var(--accent-light);border-radius:8px;font-size:13px;display:none">
+      💡 按分後の経費額：<strong id="amount-preview-val" style="font-family:'DM Mono',monospace;color:var(--accent);font-size:15px"></strong>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="save-btn" onclick="saveRecord()">💾 スプレッドシートに保存</button>
+      <button class="btn btn-secondary" onclick="clearRecordForm()">🔄 クリア</button>
+      <button class="btn btn-secondary btn-sm" id="cancel-edit-btn" style="display:none" onclick="cancelEdit()">✕ キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- INCOME -->
+<div id="section-income" class="section">
+  <div class="alert ai">💰 <div><strong>収入・補助金・給付金</strong>は経費ではなく「売上・収入」として記録します。補助金・給付金は原則として課税対象の収入です。</div></div>
+  <div class="card">
+    <div class="card-title" id="inc-form-title">💰 収入・補助金を入力する</div>
+    <input type="hidden" id="edit-income-id">
+    <div class="form-grid">
+      <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="inc-date"></div>
+      <div class="form-group"><label>金額（円）<span class="req">*</span></label><input type="number" id="inc-amount" placeholder="例：100000" min="0"></div>
+      <div class="form-group">
+        <label>種類 <span class="req">*</span></label>
+        <select id="inc-type">
+          <option value="売上">💼 売上（仕事の報酬）</option>
+          <option value="補助金">🏛 補助金（IT導入・ものづくり等）</option>
+          <option value="給付金">💴 給付金（持続化給付金等）</option>
+          <option value="助成金">📋 助成金</option>
+          <option value="家賃収入">🏠 家賃収入</option>
+          <option value="その他収入">📎 その他収入</option>
+        </select>
+        <div class="hint">補助金・給付金・家賃収入は課税対象です。申告漏れに注意！</div>
+      </div>
+      <div class="form-group"><label>内容・摘要 <span class="req">*</span></label><input type="text" id="inc-memo" placeholder="例：〇〇様 デザイン制作費・IT導入補助金"></div>
+      <div class="form-group full"><label>メモ（任意）</label><textarea id="inc-note" placeholder="補助金の場合は申請番号や事業名を記録しておくと◎"></textarea></div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-blue" id="inc-save-btn" onclick="saveIncome()">💾 収入として保存</button>
+      <button class="btn btn-secondary" onclick="clearIncomeForm()">🔄 クリア</button>
+      <button class="btn btn-secondary btn-sm" id="cancel-inc-edit-btn" style="display:none" onclick="cancelIncEdit()">✕ キャンセル</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" style="margin:0">📋 収入・補助金リスト</div>
+      <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:var(--blue)" id="inc-total-disp">合計 ¥0</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>日付</th><th>種類</th><th>内容</th><th style="text-align:right">金額</th><th>操作</th></tr></thead>
+        <tbody id="inc-body"></tbody>
+      </table>
+    </div>
+    <div id="inc-empty" class="empty-state" style="display:none"><div class="ei">💴</div><p>まだ登録がありません</p></div>
+  </div>
+</div>
+
+<!-- LIST -->
+<div id="section-list" class="section">
+  <div class="card">
+    <div class="card-title">🔍 絞り込み</div>
+    <div class="filter-row" id="filter-cats"><button class="filter-btn active" onclick="filterCat('all',this)">すべて</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <select id="f-year" onchange="renderList()" style="width:auto">
+        <option value="">年度（全て）</option>
+        <option value="2024">2024年</option><option value="2025">2025年</option>
+        <option value="2026" selected>2026年</option><option value="2027">2027年</option>
+      </select>
+      <select id="f-month" onchange="renderList()" style="width:auto">
+        <option value="">月（全て）</option>
+        <option value="01">1月</option><option value="02">2月</option><option value="03">3月</option>
+        <option value="04">4月</option><option value="05">5月</option><option value="06">6月</option>
+        <option value="07">7月</option><option value="08">8月</option><option value="09">9月</option>
+        <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+      </select>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      <div class="card-title" style="margin:0">📋 経費一覧</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="l-count" style="font-size:12px;color:var(--text3)">0件</span>
+        <span id="l-total" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--red)"></span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>日付</th><th>科目</th><th>内容</th><th>支払</th><th style="text-align:right">按分後金額</th><th>操作</th></tr></thead>
+        <tbody id="records-body"></tbody>
+      </table>
+    </div>
+    <div id="l-empty" class="empty-state" style="display:none"><div class="ei">📋</div><p>経費がありません</p></div>
+  </div>
+</div>
+
+<!-- KAIGYOHI -->
+<div id="section-kaigyohi" class="section">
+  <div class="alert as">🌱 <div><strong>開業費とは</strong>：開業前に事業のためにかかった費用。開業後、利益が出た年に任意で経費として計上（任意償却）できます。EtsyやCG制作の準備費用はここに記録しましょう。</div></div>
+  <div class="card">
+    <div class="card-title" id="k-form-title">🌱 開業費を入力する</div>
+    <input type="hidden" id="edit-k-id">
+    <div class="form-grid">
+      <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="k-date"></div>
+      <div class="form-group"><label>金額（円）<span class="req">*</span></label><input type="number" id="k-amount" placeholder="例：50000" min="0"></div>
+      <div class="form-group">
+        <label>カテゴリ <span class="req">*</span></label>
+        <select id="k-cat">
+          <option value="通信費">📱 通信費・ネット費用</option>
+          <option value="消耗品費">✏️ 消耗品・備品購入</option>
+          <option value="広告宣伝費">📣 広告費・PR費用</option>
+          <option value="研修費">📚 セミナー・研修・書籍代</option>
+          <option value="旅費交通費">🚃 交通費</option>
+          <option value="諸会費">📋 会費・登録費</option>
+          <option value="支払手数料">💳 手数料</option>
+          <option value="その他開業費">📎 その他</option>
+        </select>
+      </div>
+      <div class="form-group"><label>内容 <span class="req">*</span></label><input type="text" id="k-memo" placeholder="例：Etsy出品用パソコン・CG制作ソフト購入"></div>
+      <div class="form-group full"><label>メモ（任意）</label><textarea id="k-note" placeholder="購入先・事業との関連など"></textarea></div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-orange" id="k-save-btn" onclick="saveKaigyohi()">💾 開業費として保存</button>
+      <button class="btn btn-secondary" onclick="clearKaigyohiForm()">🔄 クリア</button>
+      <button class="btn btn-secondary btn-sm" id="cancel-k-edit-btn" style="display:none" onclick="cancelKEdit()">✕ キャンセル</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" style="margin:0">📋 開業費リスト</div>
+      <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:var(--orange)" id="k-total-disp">合計 ¥0</span>
+    </div>
+    <div class="alert ai" style="margin-bottom:10px">💡 <div>開業後に経費として計上する場合は「経費に移動」ボタンを押してください。経費シートに自動的に追加されます。</div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>日付</th><th>カテゴリ</th><th>内容</th><th style="text-align:right">金額</th><th>操作</th></tr></thead>
+        <tbody id="k-body"></tbody>
+      </table>
+    </div>
+    <div id="k-empty" class="empty-state" style="display:none"><div class="ei">🌱</div><p>開業費の登録がありません</p></div>
+  </div>
+</div>
+
+<!-- 家事按分 -->
+<div id="section-按分" class="section">
+  <div class="alert as">🏠 <div><strong>家事按分とは</strong>：自宅で仕事をしている場合、家賃・電気代・ネット代・スマホ代を「仕事で使う割合」だけ経費にできます。</div></div>
+  <div class="alert ar">❌ <div><strong>ガス・水道代は経費にできません</strong>（税務署は「仕事でガス・水は使わない」と判断します）。</div></div>
+  <div class="按分card">
+    <div class="card-title">⚙️ 按分割合の設定</div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text2)">計算方法を選んでください</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="按分method" value="面積" onchange="update按分Method()" checked> 部屋の面積で計算</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="按分method" value="時間" onchange="update按分Method()"> 使用時間で計算</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="按分method" value="手動" onchange="update按分Method()"> 割合を直接入力</label>
+      </div>
+    </div>
+    <div id="按分-面積" class="按分row">
+      <div class="form-group"><label>自宅全体の面積（㎡）</label><input type="number" id="按分-total-area" placeholder="例：60" oninput="calc按分()"></div>
+      <div class="form-group"><label>仕事専用スペース（㎡）</label><input type="number" id="按分-work-area" placeholder="例：12" oninput="calc按分()"></div>
+      <div class="form-group"><label>算出割合</label><input type="text" id="按分-area-result" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
+    </div>
+    <div id="按分-時間" style="display:none" class="按分row">
+      <div class="form-group"><label>1日の仕事時間（時間）</label><input type="number" id="按分-work-hours" placeholder="例：8" oninput="calc按分()"></div>
+      <div class="form-group"><label>1日の在宅時間（時間）</label><input type="number" id="按分-home-hours" placeholder="例：16" oninput="calc按分()"></div>
+      <div class="form-group"><label>算出割合</label><input type="text" id="按分-time-result" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
+    </div>
+    <div id="按分-手動" style="display:none">
+      <div class="form-group" style="max-width:200px"><label>按分割合（%）</label><input type="number" id="按分-manual" placeholder="例：20" min="1" max="100" oninput="calc按分()"></div>
+    </div>
+    <div class="按分result" id="按分-preview">按分割合を設定すると自動計算されます</div>
+  </div>
+  <div class="card">
+    <div class="card-title">📝 毎月の固定費（月額を入力すると経費額を自動計算）</div>
+    <div class="form-grid">
+      <div class="form-group"><label>🏠 家賃（月額）</label><input type="number" id="fix-rent" placeholder="例：80000" oninput="updateFixedCosts()"></div>
+      <div class="form-group"><label>💡 電気代（月額目安）</label><input type="number" id="fix-elec" placeholder="例：8000" oninput="updateFixedCosts()"></div>
+      <div class="form-group"><label>🌐 インターネット代（月額）</label><input type="number" id="fix-net" placeholder="例：5000" oninput="updateFixedCosts()"></div>
+      <div class="form-group"><label>📱 スマホ代（月額）</label><input type="number" id="fix-phone" placeholder="例：3000" oninput="updateFixedCosts()"></div>
+    </div>
+    <div id="fixed-cost-result" style="margin-top:14px"></div>
+    <div style="margin-top:12px"><button class="btn btn-primary" onclick="saveFixedCosts()">💾 按分設定を保存</button></div>
+  </div>
+</div>
+
+<!-- 減価償却 -->
+<div id="section-deprec" class="section">
+  <div class="alert ai">📦 <div><strong>10万円以上の資産</strong>（パソコン・カメラ・家具等）は一括経費にできません。耐用年数にわたって毎年少しずつ経費にします（減価償却）。青色申告なら30万円未満は一括で経費にできる特例もあります。</div></div>
+  <div class="alert as">✨ <div><strong>青色申告特例（少額減価償却資産）</strong>：青色申告者は取得価額30万円未満の資産を購入年に全額経費にできます（年間300万円まで）。開業後はこの特例を活用しましょう。</div></div>
+  <div class="card">
+    <div class="card-title">📦 固定資産を登録する</div>
+    <div class="form-grid">
+      <div class="form-group"><label>取得日 <span class="req">*</span></label><input type="date" id="dep-date"></div>
+      <div class="form-group"><label>品名 <span class="req">*</span></label><input type="text" id="dep-name" placeholder="例：MacBook Pro・デジタル一眼カメラ"></div>
+      <div class="form-group"><label>取得価額（円）<span class="req">*</span></label><input type="number" id="dep-cost" placeholder="例：200000" min="0" oninput="calcDeprec()"></div>
+      <div class="form-group">
+        <label>耐用年数 <span class="req">*</span></label>
+        <select id="dep-years" onchange="calcDeprec()">
+          <option value="2">2年（ソフトウェア）</option>
+          <option value="4" selected>4年（パソコン・自動車）</option>
+          <option value="5">5年（カメラ・サーバー）</option>
+          <option value="6">6年（テレビ・冷蔵庫）</option>
+          <option value="8">8年（家具）</option>
+          <option value="10">10年（金属製家具・自転車）</option>
+          <option value="custom">その他（直接入力）</option>
+        </select>
+      </div>
+      <div class="form-group" id="dep-years-custom-wrap" style="display:none">
+        <label>耐用年数（年）</label><input type="number" id="dep-years-custom" min="1" max="50" oninput="calcDeprec()">
+      </div>
+      <div class="form-group">
+        <label>償却方法</label>
+        <select id="dep-method" onchange="calcDeprec()">
+          <option value="定額法" selected>定額法（毎年同額）</option>
+          <option value="定率法">定率法（最初多く・後少なく）</option>
+        </select>
+        <div class="hint">個人事業主は原則「定額法」</div>
+      </div>
+      <div class="form-group">
+        <label>事業使用割合（%）</label>
+        <input type="number" id="dep-ratio" value="100" min="1" max="100" oninput="calcDeprec()">
+        <div class="hint">自宅兼用の場合は按分割合を入力</div>
+      </div>
+      <div class="form-group full"><label>メモ（任意）</label><textarea id="dep-note" placeholder="購入先・用途など"></textarea></div>
+    </div>
+    <div id="dep-preview" style="margin-top:10px;padding:12px 14px;background:var(--purple-light);border-radius:8px;font-size:13px;display:none">
+      <strong style="color:var(--purple)" id="dep-preview-text"></strong>
+    </div>
+    <div style="margin-top:14px">
+      <button class="btn btn-purple" id="dep-save-btn" onclick="saveDeprec()">💾 固定資産を登録</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title" style="margin:0">📋 固定資産リスト</div>
+      <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:var(--purple)" id="dep-total-disp">年間償却 ¥0</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>取得日</th><th>品名</th><th style="text-align:right">取得価額</th><th>耐用年数</th><th style="text-align:right">年間償却額</th><th>操作</th></tr></thead>
+        <tbody id="dep-body"></tbody>
+      </table>
+    </div>
+    <div id="dep-empty" class="empty-state" style="display:none"><div class="ei">📦</div><p>固定資産の登録がありません</p></div>
+  </div>
+</div>
+
+<!-- REPORT -->
+<div id="section-report" class="section">
+  <div class="year-row">
+    <label>集計年度：</label>
+    <select id="r-year" onchange="renderReport()">
+      <option value="2024">2024年</option><option value="2025">2025年</option>
+      <option value="2026" selected>2026年</option><option value="2027">2027年</option>
+    </select>
+  </div>
+  <div class="summary-grid">
+    <div class="stat-box"><div class="stat-label">収入合計</div><div class="stat-value blue" id="r-inc-total">¥0</div></div>
+    <div class="stat-box"><div class="stat-label">経費合計（按分後）</div><div class="stat-value red" id="r-exp-total">¥0</div></div>
+    <div class="stat-box"><div class="stat-label">利益（収入 − 経費）</div><div class="stat-value green" id="r-profit">¥0</div></div>
+    <div class="stat-box"><div class="stat-label">開業費合計</div><div class="stat-value orange" id="r-k-total">¥0</div></div>
+  </div>
+  <div class="card"><div class="card-title">📊 科目別経費内訳</div><div id="r-by-cat"></div></div>
+  <div class="card"><div class="card-title">💰 収入種類別内訳</div><div id="r-by-income"></div></div>
+  <div class="card">
+    <div class="card-title">📅 月別サマリー</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>月</th><th style="text-align:right">経費（按分後）</th><th style="text-align:right">収入</th><th>件数</th></tr></thead>
+        <tbody id="r-monthly"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card"><div class="card-title">🌱 開業費・減価償却</div><div id="r-k"></div></div>
+</div>
+
+<!-- GUIDE -->
+<div id="section-guide" class="section">
+  <div class="alert ai">📖 <div>副業・個人事業主向けの主な勘定科目ガイドです。迷ったときに参考にしてください。</div></div>
+  <div id="guide-cards"></div>
+</div>
+
+</div><!-- /content -->
+</div><!-- /app-screen -->
+
+<script>
+// ══ STATE ══
+let GAS_URL = '';
+let records = [], kaigyohi = [], incomes = [], deprec = [];
+let currentFilterCat = 'all';
+let 按分設定 = {ratio:0, rent:0, elec:0, net:0, phone:0};
+
+// カテゴリヒント
+const catHints = {
+  '通信費_AI':'ChatGPT・Claude等のサブスク。全額経費になります。',
+  '諸会費_デザイン':'Adobe CC・Canva Pro等。全額経費になります。',
+  '工具器具備品':'10万円以上のPCや機材。減価償却タブへ登録をおすすめします。',
+  '地代家賃_按分':'家事按分タブで設定した割合が自動で適用されます。',
+  '水道光熱費_按分':'電気代のみ経費になります。ガス・水道は不可。',
+  '通信費_按分_net':'インターネット回線代。家事按分が適用されます。',
+  '通信費_按分_phone':'スマホ代。家事按分が適用されます。',
+  '接待交際費':'取引先との飲食代等。5,000円以下かつ領収書必須。',
+  '広告宣伝費':'Etsy出品費・SNS広告・名刺印刷等。',
+};
+
+// ガイドデータ
+const guideData = [
+  {icon:'🤖', cat:'通信費（AIサービス）', note:'全額経費 / 確実に経費になる', ex:'ChatGPT Plus・Claude Pro・Midjourney等の月額サブスク'},
+  {icon:'🎨', cat:'諸会費（デザインツール）', note:'全額経費 / 確実に経費になる', ex:'Adobe Creative Cloud・Canva Pro・Figma等'},
+  {icon:'☁️', cat:'諸会費（クラウドツール）', note:'全額経費 / 確実に経費になる', ex:'Notion・Dropbox・Google Workspace等'},
+  {icon:'🌐', cat:'通信費（ドメイン・サーバー）', note:'全額経費', ex:'お名前.com・エックスサーバー・Shopify等'},
+  {icon:'🏠', cat:'地代家賃（按分）', note:'家事按分 / 仕事割合のみ経費', ex:'家賃8万円 × 20% = 1.6万円が経費'},
+  {icon:'💡', cat:'水道光熱費（按分）', note:'電気代のみ可・ガス水道は不可', ex:'電気代8千円 × 20% = 1.6千円が経費'},
+  {icon:'📣', cat:'広告宣伝費', note:'全額経費', ex:'Etsy出品手数料・SNS広告・チラシ印刷・名刺代'},
+  {icon:'📚', cat:'研修費', note:'全額経費', ex:'Udemy・プログラミングスクール・業界セミナー参加費'},
+  {icon:'✏️', cat:'消耗品費', note:'10万円未満の物品', ex:'文房具・インク・梱包材・USBメモリ等'},
+  {icon:'💻', cat:'工具器具備品', note:'10万円以上 → 減価償却', ex:'PC・モニター・カメラ・CG制作用タブレット'},
+  {icon:'🚃', cat:'旅費交通費', note:'全額経費 / 目的地・理由を記録', ex:'取材・打ち合わせ・仕入れのための電車・バス代'},
+  {icon:'🍽', cat:'接待交際費', note:'5千円以下・相手先を記録', ex:'取引先との食事代（1人5千円以下が目安）'},
+  {icon:'📰', cat:'新聞図書費', note:'全額経費', ex:'Kindle技術書・業界誌・オライリー本・参考書'},
+];
+
+// ══ SETUP ══
+function connectGAS() {
+  const url = document.getElementById('gas-url-input').value.trim();
+  if (!url.startsWith('https://script.google.com/')) {
+    alert('正しいGASのURLを入力してください。\nhttps://script.google.com/ で始まるURLです。');
+    return;
+  }
+  localStorage.setItem('keiji_gas_url', url);
+  GAS_URL = url;
+  startApp();
+}
+
+function resetSetup() {
+  if (!confirm('設定をリセットしますか？（データは消えません）')) return;
+  localStorage.removeItem('keiji_gas_url');
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('setup-screen').style.display = 'flex';
+}
+
+function startApp() {
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  loadFixedCostSettings();
+  renderGuide();
+  loadData();
+  // デフォルト日付を今日に設定
+  const today = new Date().toISOString().split('T')[0];
+  ['i-date','inc-date','k-date','dep-date'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = today;
+  });
+}
+
+// ══ GAS COMMUNICATION ══
+async function gasRequest(payload) {
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    redirect: 'follow',
+  });
+  return await res.json();
+}
+
+function setSyncStatus(state) {
+  const el = document.getElementById('sync-status');
+  if (state === 'ok') { el.textContent = '✅ 同期済み'; el.className = 'sync-badge'; }
+  else if (state === 'syncing') { el.textContent = '⟳ 同期中'; el.className = 'sync-badge'; }
+  else { el.textContent = '⚠️ エラー'; el.className = 'sync-badge error'; }
+}
+
+async function loadData() {
+  if (!GAS_URL) return;
+  setSyncStatus('syncing');
+  showLoading('スプレッドシートからデータを読み込み中…');
+  try {
+    const result = await gasRequest({action:'getAll'});
+    if (result.ok) {
+      records  = (result.records  ||[]).map(r=>({...r, amount:toNum(r.amount), ratio:toNum(r.ratio), adjusted:toNum(r.adjusted)}));
+      kaigyohi = (result.kaigyohi ||[]).map(k=>({...k, amount:toNum(k.amount)}));
+      incomes  = (result.incomes  ||[]).map(i=>({...i, amount:toNum(i.amount)}));
+      deprec   = (result.deprec   ||[]).map(d=>({...d, cost:toNum(d.cost), annual:toNum(d.annual)}));
+      setSyncStatus('ok');
+      renderDashboard(); renderList(); renderKaigyohi();
+      renderIncomes(); renderReport(); renderFilterButtons(); renderDeprec();
+    } else {
+      setSyncStatus('error');
+      alert('データの読み込みに失敗しました。\nエラー: ' + (result.error||'不明'));
+    }
+  } catch(e) {
+    setSyncStatus('error');
+    alert('接続エラーが発生しました。\nGASのURLとデプロイ設定を確認してください。\n\n詳細: ' + e.message);
+  } finally { hideLoading(); }
+}
+
+// ══ 家事按分 ══
+function update按分Method() {
+  const m = document.querySelector('input[name="按分method"]:checked').value;
+  document.getElementById('按分-面積').style.display = m==='面積'?'grid':'none';
+  document.getElementById('按分-時間').style.display = m==='時間'?'grid':'none';
+  document.getElementById('按分-手動').style.display = m==='手動'?'block':'none';
+  calc按分();
+}
+
+function calc按分() {
+  const m = document.querySelector('input[name="按分method"]:checked').value;
+  let ratio = 0;
+  if (m==='面積') {
+    const total = parseFloat(document.getElementById('按分-total-area').value)||0;
+    const work  = parseFloat(document.getElementById('按分-work-area').value)||0;
+    ratio = total>0 ? Math.round(work/total*100) : 0;
+    document.getElementById('按分-area-result').value = ratio+'%';
+  } else if (m==='時間') {
+    const work = parseFloat(document.getElementById('按分-work-hours').value)||0;
+    const home = parseFloat(document.getElementById('按分-home-hours').value)||0;
+    ratio = home>0 ? Math.round(work/home*100) : 0;
+    document.getElementById('按分-time-result').value = ratio+'%';
+  } else {
+    ratio = parseFloat(document.getElementById('按分-manual').value)||0;
+  }
+  按分設定.ratio = ratio;
+  updateFixedCosts();
+}
+
+function updateFixedCosts() {
+  const r = 按分設定.ratio||0;
+  const rent  = parseFloat(document.getElementById('fix-rent').value)||0;
+  const elec  = parseFloat(document.getElementById('fix-elec').value)||0;
+  const net   = parseFloat(document.getElementById('fix-net').value)||0;
+  const phone = parseFloat(document.getElementById('fix-phone').value)||0;
+  按分設定.rent=rent; 按分設定.elec=elec; 按分設定.net=net; 按分設定.phone=phone;
+  const ra=Math.round(rent*r/100), ea=Math.round(elec*r/100), na=Math.round(net*r/100), pa=Math.round(phone*r/100);
+  const total=ra+ea+na+pa;
+  const el=document.getElementById('fixed-cost-result');
+  if (!rent&&!elec&&!net&&!phone){el.innerHTML='';return;}
+  el.innerHTML=`<div style="background:#fff;border-radius:10px;border:1px solid var(--accent2);overflow:hidden">
+    <div style="background:var(--accent);color:#fff;padding:8px 14px;font-size:12px;font-weight:700">按分割合 ${r}% で計算した月額経費</div>
+    <div style="padding:12px 14px;display:grid;gap:6px">
+      ${rent?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>🏠 家賃 ${fmt(rent)} × ${r}%</span><strong style="color:var(--red)">${fmt(ra)}</strong></div>`:''}
+      ${elec?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>💡 電気代 ${fmt(elec)} × ${r}%</span><strong style="color:var(--red)">${fmt(ea)}</strong></div>`:''}
+      ${net?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>🌐 ネット ${fmt(net)} × ${r}%</span><strong style="color:var(--red)">${fmt(na)}</strong></div>`:''}
+      ${phone?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>📱 スマホ ${fmt(phone)} × ${r}%</span><strong style="color:var(--red)">${fmt(pa)}</strong></div>`:''}
+      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+        <span>月の家事按分経費合計</span><strong style="color:var(--accent);font-family:'DM Mono',monospace">${fmt(total)}</strong>
+      </div>
+      <div style="font-size:11px;color:var(--text3)">年間：${fmt(total*12)}</div>
+    </div>
+  </div>`;
+  document.getElementById('按分-preview').innerHTML=`按分割合 <strong>${r}%</strong> が設定されています。家事按分科目を選ぶと自動でこの割合が適用されます。`;
+}
+
+function saveFixedCosts() {
+  localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
+  alert('✅ 按分設定を保存しました！');
+}
+
+function loadFixedCostSettings() {
+  try {
+    const saved = localStorage.getItem('keiji_按分');
+    if (saved) {
+      按分設定 = JSON.parse(saved);
+      if (按分設定.rent) document.getElementById('fix-rent').value=按分設定.rent;
+      if (按分設定.elec) document.getElementById('fix-elec').value=按分設定.elec;
+      if (按分設定.net)  document.getElementById('fix-net').value=按分設定.net;
+      if (按分設定.phone)document.getElementById('fix-phone').value=按分設定.phone;
+      if (按分設定.ratio){
+        document.getElementById('按分-manual').value=按分設定.ratio;
+        document.querySelector('input[name="按分method"][value="手動"]').checked=true;
+        update按分Method();
+      }
+    }
+  } catch(e){}
+}
+
+// ══ 経費入力 ══
+function onCatChange() {
+  const cat = document.getElementById('i-cat').value;
+  document.getElementById('cat-hint').textContent = catHints[cat]||'';
+  const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
+  if (按分Cats.includes(cat)) {
+    const r = 按分設定.ratio||20;
+    document.getElementById('i-ratio').value = [100,80,50,30,20].includes(r) ? String(r) : 'custom';
+    document.getElementById('i-ratio-custom').value = r;
+    document.getElementById('custom-ratio-wrap').style.display = 'block';
+    document.getElementById('ratio-hint').textContent = `家事按分${r}%が自動設定されました`;
+    const amtMap = {'地代家賃_按分':按分設定.rent,'水道光熱費_按分':按分設定.elec,'通信費_按分_net':按分設定.net,'通信費_按分_phone':按分設定.phone};
+    const autoAmt = amtMap[cat];
+    if (autoAmt) document.getElementById('i-amount').value = autoAmt;
+  } else {
+    document.getElementById('ratio-hint').textContent = '';
+    document.getElementById('custom-ratio-wrap').style.display = 'none';
+  }
+  updateAmountPreview();
+}
+
+function updateAmountPreview() {
+  const amount = parseFloat(document.getElementById('i-amount').value)||0;
+  const ratioSel = document.getElementById('i-ratio').value;
+  if (ratioSel === 'custom') document.getElementById('custom-ratio-wrap').style.display = 'block';
+  const ratio = ratioSel==='custom' ? parseFloat(document.getElementById('i-ratio-custom').value)||100 : parseFloat(ratioSel)||100;
+  const adj = Math.round(amount*ratio/100);
+  const preview = document.getElementById('amount-preview');
+  if (amount > 0) {
+    preview.style.display = 'block';
+    document.getElementById('amount-preview-val').textContent = fmt(adj)+(ratio<100?` （${ratio}%按分）`:'');
+  } else { preview.style.display = 'none'; }
+}
+
+async function saveRecord() {
+  const date = document.getElementById('i-date').value;
+  const amount = parseFloat(document.getElementById('i-amount').value)||0;
+  const category = document.getElementById('i-cat').value;
+  const memo = document.getElementById('i-memo').value.trim();
+  const payment = document.getElementById('i-pay').value;
+  const ratioSel = document.getElementById('i-ratio').value;
+  const note = document.getElementById('i-note').value.trim();
+  if (!date||!amount||!category||!memo) { alert('日付・金額・科目・内容は必須です'); return; }
+  const ratio = ratioSel==='custom' ? parseFloat(document.getElementById('i-ratio-custom').value)||100 : parseFloat(ratioSel)||100;
+  const adjusted = Math.round(amount*ratio/100);
+  const editId = document.getElementById('edit-record-id').value;
+
+  if (editId) {
+    // 更新モード
+    const record = {id:editId, date, category, memo, payment, amount, ratio, adjusted, note};
+    document.getElementById('save-btn').disabled = true;
+    showLoading('更新中…');
+    try {
+      const result = await gasRequest({action:'updateRecord', record});
+      if (result.ok) {
+        const idx = records.findIndex(r=>String(r.id)===String(editId));
+        if (idx>=0) records[idx] = record;
+        clearRecordForm(); renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
+        alert('✅ 更新しました！');
+      } else { alert('更新に失敗しました: '+(result.error||'')); }
+    } catch(e){ alert('接続エラー: '+e.message); }
+    finally { hideLoading(); document.getElementById('save-btn').disabled=false; }
+  } else {
+    // 新規追加
+    const record = {id:Date.now(), date, category, memo, payment, amount, ratio, adjusted, note};
+    document.getElementById('save-btn').disabled = true;
+    showLoading('スプレッドシートに保存中…');
+    try {
+      const result = await gasRequest({action:'addRecord', record});
+      if (result.ok) {
+        records.push(record); clearRecordForm(); renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
+        alert('✅ 保存しました！');
+      } else { alert('保存に失敗しました: '+(result.error||'')); }
+    } catch(e){ alert('接続エラー: '+e.message); }
+    finally { hideLoading(); document.getElementById('save-btn').disabled=false; }
+  }
+}
+
+function editRecord(id) {
+  const r = records.find(r=>String(r.id)===String(id));
+  if (!r) return;
+  document.getElementById('edit-record-id').value = r.id;
+  document.getElementById('i-date').value = r.date;
+  document.getElementById('i-amount').value = r.amount;
+  document.getElementById('i-cat').value = r.category;
+  document.getElementById('i-memo').value = r.memo;
+  document.getElementById('i-pay').value = r.payment;
+  document.getElementById('i-note').value = r.note||'';
+  const ratioOpts = ['100','80','50','30','20'];
+  if (ratioOpts.includes(String(r.ratio))) {
+    document.getElementById('i-ratio').value = String(r.ratio);
+    document.getElementById('custom-ratio-wrap').style.display = 'none';
+  } else {
+    document.getElementById('i-ratio').value = 'custom';
+    document.getElementById('i-ratio-custom').value = r.ratio;
+    document.getElementById('custom-ratio-wrap').style.display = 'block';
+  }
+  document.getElementById('add-form-title').textContent = '✏️ 経費を編集する';
+  document.getElementById('save-btn').textContent = '💾 更新する';
+  document.getElementById('cancel-edit-btn').style.display = 'inline-flex';
+  showSection('add', document.querySelector('.main-tab:nth-child(2)'));
+  updateAmountPreview();
+  window.scrollTo(0, 0);
+}
+
+function cancelEdit() {
+  clearRecordForm();
+}
+
+function clearRecordForm() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('edit-record-id').value = '';
+  document.getElementById('i-date').value = today;
+  ['i-amount','i-memo','i-note','i-ratio-custom'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('i-cat').value = '';
+  document.getElementById('i-pay').value = 'クレジットカード';
+  document.getElementById('i-ratio').value = '100';
+  document.getElementById('custom-ratio-wrap').style.display = 'none';
+  document.getElementById('cat-hint').textContent = '';
+  document.getElementById('ratio-hint').textContent = '';
+  document.getElementById('amount-preview').style.display = 'none';
+  document.getElementById('add-form-title').textContent = '✏️ 経費を入力する';
+  document.getElementById('save-btn').textContent = '💾 スプレッドシートに保存';
+  document.getElementById('cancel-edit-btn').style.display = 'none';
+}
+
+async function deleteRecord(id) {
+  if (!confirm('この経費を削除しますか？')) return;
+  showLoading('削除中…');
+  try {
+    const result = await gasRequest({action:'delRecord', id});
+    if (result.ok) { records=records.filter(r=>String(r.id)!==String(id)); renderList(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
+  } catch(e){ alert('削除に失敗しました'); }
+  finally { hideLoading(); }
+}
+
+// ══ 開業費 ══
+async function saveKaigyohi() {
+  const date = document.getElementById('k-date').value;
+  const amount = parseFloat(document.getElementById('k-amount').value)||0;
+  const memo = document.getElementById('k-memo').value.trim();
+  const category = document.getElementById('k-cat').value;
+  const note = document.getElementById('k-note').value.trim();
+  if (!date||!amount||!memo) { alert('日付・金額・内容は必須です'); return; }
+  const editId = document.getElementById('edit-k-id').value;
+
+  if (editId) {
+    const record = {id:editId, date, category, memo, amount, note};
+    document.getElementById('k-save-btn').disabled=true;
+    showLoading('開業費を更新中…');
+    try {
+      const result = await gasRequest({action:'updateKaigyohi', record});
+      if (result.ok) {
+        const idx=kaigyohi.findIndex(k=>String(k.id)===String(editId));
+        if (idx>=0) kaigyohi[idx]=record;
+        clearKaigyohiForm(); renderKaigyohi(); renderDashboard(); renderReport(); setSyncStatus('ok');
+        alert('✅ 更新しました！');
+      }
+    } catch(e){ alert('エラー: '+e.message); }
+    finally { hideLoading(); document.getElementById('k-save-btn').disabled=false; }
+  } else {
+    const record = {id:Date.now(), date, category, memo, amount, note};
+    document.getElementById('k-save-btn').disabled=true;
+    showLoading('開業費を保存中…');
+    try {
+      const result = await gasRequest({action:'addKaigyohi', record});
+      if (result.ok) {
+        kaigyohi.push(record);
+        clearKaigyohiForm(); renderKaigyohi(); renderDashboard(); renderReport(); setSyncStatus('ok');
+        alert('✅ 開業費として保存しました！');
+      }
+    } catch(e){ alert('エラー: '+e.message); }
+    finally { hideLoading(); document.getElementById('k-save-btn').disabled=false; }
+  }
+}
+
+function editKaigyohi(id) {
+  const k = kaigyohi.find(k=>String(k.id)===String(id));
+  if (!k) return;
+  document.getElementById('edit-k-id').value = k.id;
+  document.getElementById('k-date').value = k.date;
+  document.getElementById('k-amount').value = k.amount;
+  document.getElementById('k-cat').value = k.category;
+  document.getElementById('k-memo').value = k.memo;
+  document.getElementById('k-note').value = k.note||'';
+  document.getElementById('k-form-title').textContent = '🌱 開業費を編集する';
+  document.getElementById('k-save-btn').textContent = '💾 更新する';
+  document.getElementById('cancel-k-edit-btn').style.display = 'inline-flex';
+  window.scrollTo(0, 0);
+}
+
+function cancelKEdit() { clearKaigyohiForm(); }
+
+function clearKaigyohiForm() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('edit-k-id').value='';
+  document.getElementById('k-date').value=today;
+  ['k-amount','k-memo','k-note'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('k-form-title').textContent='🌱 開業費を入力する';
+  document.getElementById('k-save-btn').textContent='💾 開業費として保存';
+  document.getElementById('cancel-k-edit-btn').style.display='none';
+}
+
+async function deleteKaigyohi(id) {
+  if (!confirm('削除しますか？')) return;
+  showLoading('削除中…');
+  try {
+    const result = await gasRequest({action:'delKaigyohi', id});
+    if (result.ok) { kaigyohi=kaigyohi.filter(k=>String(k.id)!==String(id)); renderKaigyohi(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
+  } catch(e){ alert('削除に失敗しました'); }
+  finally { hideLoading(); }
+}
+
+async function moveKaigyohiToExpense(id) {
+  const k = kaigyohi.find(k=>String(k.id)===String(id));
+  if (!k) return;
+  if (!confirm(`「${k.memo}」（${fmt(k.amount)}）を経費シートに移動しますか？\n開業費として記録しつつ、経費にも追加されます。`)) return;
+  showLoading('経費シートに移動中…');
+  try {
+    const result = await gasRequest({action:'moveToRecord', id});
+    if (result.ok) {
+      // 経費リストにも反映
+      const newRec = {id:String(result.newId), date:k.date, category:'開業費→経費', memo:k.memo, payment:'現金', amount:k.amount, ratio:100, adjusted:k.amount, note:'開業費より移動: '+k.category};
+      records.push(newRec);
+      const idx=kaigyohi.findIndex(ki=>String(ki.id)===String(id));
+      if(idx>=0) kaigyohi[idx].moved=true;
+      renderKaigyohi(); renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
+      alert('✅ 経費シートに移動しました！');
+    }
+  } catch(e){ alert('エラー: '+e.message); }
+  finally { hideLoading(); }
+}
+
+// ══ 収入 ══
+async function saveIncome() {
+  const date = document.getElementById('inc-date').value;
+  const amount = parseFloat(document.getElementById('inc-amount').value)||0;
+  const type = document.getElementById('inc-type').value;
+  const memo = document.getElementById('inc-memo').value.trim();
+  const note = document.getElementById('inc-note').value.trim();
+  if (!date||!amount||!memo) { alert('日付・金額・内容は必須です'); return; }
+  const editId = document.getElementById('edit-income-id').value;
+
+  if (editId) {
+    const record = {id:editId, date, type, memo, amount, note};
+    document.getElementById('inc-save-btn').disabled=true;
+    showLoading('収入を更新中…');
+    try {
+      const result = await gasRequest({action:'updateIncome', record});
+      if (result.ok) {
+        const idx=incomes.findIndex(i=>String(i.id)===String(editId));
+        if(idx>=0) incomes[idx]=record;
+        clearIncomeForm(); renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
+        alert('✅ 更新しました！');
+      }
+    } catch(e){ alert('エラー: '+e.message); }
+    finally { hideLoading(); document.getElementById('inc-save-btn').disabled=false; }
+  } else {
+    const record = {id:Date.now(), date, type, memo, amount, note};
+    document.getElementById('inc-save-btn').disabled=true;
+    showLoading('収入を保存中…');
+    try {
+      const result = await gasRequest({action:'addIncome', record});
+      if (result.ok) {
+        incomes.push(record); clearIncomeForm(); renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
+        alert('✅ 保存しました！');
+      }
+    } catch(e){ alert('エラー: '+e.message); }
+    finally { hideLoading(); document.getElementById('inc-save-btn').disabled=false; }
+  }
+}
+
+function editIncome(id) {
+  const i = incomes.find(i=>String(i.id)===String(id));
+  if (!i) return;
+  document.getElementById('edit-income-id').value=i.id;
+  document.getElementById('inc-date').value=i.date;
+  document.getElementById('inc-amount').value=i.amount;
+  document.getElementById('inc-type').value=i.type;
+  document.getElementById('inc-memo').value=i.memo;
+  document.getElementById('inc-note').value=i.note||'';
+  document.getElementById('inc-form-title').textContent='💰 収入を編集する';
+  document.getElementById('inc-save-btn').textContent='💾 更新する';
+  document.getElementById('cancel-inc-edit-btn').style.display='inline-flex';
+  window.scrollTo(0,0);
+}
+
+function cancelIncEdit(){ clearIncomeForm(); }
+
+function clearIncomeForm(){
+  const today=new Date().toISOString().split('T')[0];
+  document.getElementById('edit-income-id').value='';
+  document.getElementById('inc-date').value=today;
+  ['inc-amount','inc-memo','inc-note'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('inc-form-title').textContent='💰 収入・補助金を入力する';
+  document.getElementById('inc-save-btn').textContent='💾 収入として保存';
+  document.getElementById('cancel-inc-edit-btn').style.display='none';
+}
+
+async function deleteIncome(id) {
+  if (!confirm('削除しますか？')) return;
+  showLoading('削除中…');
+  try {
+    const result = await gasRequest({action:'delIncome', id});
+    if (result.ok) { incomes=incomes.filter(i=>String(i.id)!==String(id)); renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
+  } catch(e){ alert('削除に失敗しました'); }
+  finally { hideLoading(); }
+}
+
+// ══ 減価償却 ══
+function calcDeprec() {
+  const cost = parseFloat(document.getElementById('dep-cost').value)||0;
+  const yearsEl = document.getElementById('dep-years');
+  const yearsCustom = document.getElementById('dep-years-custom-wrap');
+  let years;
+  if (yearsEl.value === 'custom') {
+    yearsCustom.style.display='block';
+    years = parseFloat(document.getElementById('dep-years-custom').value)||0;
+  } else {
+    yearsCustom.style.display='none';
+    years = parseFloat(yearsEl.value)||4;
+  }
+  const method = document.getElementById('dep-method').value;
+  const ratio = parseFloat(document.getElementById('dep-ratio').value)||100;
+  const preview = document.getElementById('dep-preview');
+  if (!cost||!years) { preview.style.display='none'; return; }
+  let annual;
+  if (method==='定額法') {
+    annual = Math.round(cost/years * ratio/100);
+  } else {
+    // 定率法（簡易：償却率 = 1-残存価額率 ≈ 1/耐用年数 × 2）
+    const rate = Math.min(2/years, 1);
+    annual = Math.round(cost*rate * ratio/100);
+  }
+  preview.style.display='block';
+  document.getElementById('dep-preview-text').innerHTML =
+    `${method}・耐用${years}年 → 年間償却額 <span style="font-size:16px;font-family:'DM Mono',monospace">${fmt(annual)}</span>（事業割合${ratio}%）<br>
+    <span style="font-size:12px;color:var(--text2)">※ 30万円未満の場合、青色申告の少額減価償却特例で全額一括経費も可能です。</span>`;
+  return annual;
+}
+
+async function saveDeprec() {
+  const date = document.getElementById('dep-date').value;
+  const name = document.getElementById('dep-name').value.trim();
+  const cost = parseFloat(document.getElementById('dep-cost').value)||0;
+  const yearsEl = document.getElementById('dep-years');
+  const years = yearsEl.value==='custom' ? parseFloat(document.getElementById('dep-years-custom').value)||0 : parseFloat(yearsEl.value)||0;
+  const method = document.getElementById('dep-method').value;
+  const ratio = parseFloat(document.getElementById('dep-ratio').value)||100;
+  const note = document.getElementById('dep-note').value.trim();
+  if (!date||!name||!cost||!years) { alert('日付・品名・取得価額・耐用年数は必須です'); return; }
+  let annual;
+  if (method==='定額法') { annual=Math.round(cost/years*ratio/100); }
+  else { const rate=Math.min(2/years,1); annual=Math.round(cost*rate*ratio/100); }
+  const record = {id:Date.now(), date, name, cost, years, method, ratio, annual, note};
+  document.getElementById('dep-save-btn').disabled=true;
+  showLoading('固定資産を登録中…');
+  try {
+    const result = await gasRequest({action:'addDeprec', record});
+    if (result.ok) {
+      deprec.push(record);
+      ['dep-name','dep-cost','dep-note'].forEach(id=>document.getElementById(id).value='');
+      document.getElementById('dep-ratio').value='100';
+      document.getElementById('dep-years').value='4';
+      document.getElementById('dep-preview').style.display='none';
+      renderDeprec(); renderDashboard(); setSyncStatus('ok');
+      alert('✅ 固定資産を登録しました！');
+    }
+  } catch(e){ alert('エラー: '+e.message); }
+  finally { hideLoading(); document.getElementById('dep-save-btn').disabled=false; }
+}
+
+async function deleteDeprec(id) {
+  if (!confirm('削除しますか？')) return;
+  showLoading('削除中…');
+  try {
+    const result = await gasRequest({action:'delDeprec', id});
+    if (result.ok) { deprec=deprec.filter(d=>String(d.id)!==String(id)); renderDeprec(); renderDashboard(); setSyncStatus('ok'); }
+  } catch(e){ alert('削除に失敗しました'); }
+  finally { hideLoading(); }
+}
+
+// ══ RENDER ══
+function catDisplay(cat) {
+  const map = {
+    '通信費_AI':'AIサービス','諸会費_デザイン':'デザインツール','諸会費_クラウド':'クラウドツール',
+    '通信費_ドメイン':'ドメイン・サーバー','地代家賃_按分':'家賃（按分）','水道光熱費_按分':'電気代（按分）',
+    '通信費_按分_net':'ネット代（按分）','通信費_按分_phone':'スマホ代（按分）',
+    '旅費交通費_車':'ガソリン代','地代家賃_駐車場':'駐車場代','損害保険料_車':'自動車保険','車両費':'車両費',
+  };
+  return map[cat]||cat;
+}
+
+function renderDashboard() {
+  const year = document.getElementById('dashYear').value;
+  const yr = records.filter(r=>String(r.date).startsWith(year));
+  const total = yr.reduce((s,r)=>s+toNum(r.adjusted),0);
+  const kTotal = kaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
+  const incTotal = incomes.filter(i=>String(i.date).startsWith(year)).reduce((s,i)=>s+toNum(i.amount),0);
+  const depTotal = deprec.reduce((s,d)=>s+toNum(d.annual),0);
+  document.getElementById('s-total').textContent=fmt(total);
+  document.getElementById('s-income').textContent=fmt(incTotal);
+  document.getElementById('s-k').textContent=fmt(kTotal);
+  document.getElementById('s-deprec').textContent=fmt(depTotal);
+  const catMap={};
+  yr.forEach(r=>{const k=catDisplay(r.category);catMap[k]=(catMap[k]||0)+toNum(r.adjusted);});
+  const sorted=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
+  const max=sorted[0]?.[1]||1;
+  document.getElementById('breakdown-list').innerHTML=sorted.length===0
+    ?'<p style="color:var(--text3);text-align:center;padding:16px;font-size:13px">データがありません</p>'
+    :sorted.map(([cat,amt])=>`<div class="bkdown-item"><div class="bkdown-name">${cat}</div><div class="bkdown-bar-wrap"><div class="bkdown-bar" style="width:${Math.round(amt/max*100)}%"></div></div><div class="bkdown-amt">${fmt(amt)}</div></div>`).join('');
+  const recent=[...records].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,5);
+  document.getElementById('recent-list').innerHTML=recent.length===0
+    ?'<p style="color:var(--text3);text-align:center;padding:16px;font-size:13px">まだ入力がありません</p>'
+    :recent.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);gap:10px"><div><div style="font-size:13px;font-weight:500">${r.memo}</div><div style="font-size:11px;color:var(--text3)">${r.date} · <span class="badge bg">${catDisplay(r.category)}</span></div></div><div style="font-family:'DM Mono',monospace;font-weight:700;color:var(--red);white-space:nowrap">${fmt(toNum(r.adjusted))}</div></div>`).join('');
+}
+
+function renderFilterButtons() {
+  const cats=[...new Set(records.map(r=>catDisplay(r.category)))].sort();
+  const wrap=document.getElementById('filter-cats');
+  wrap.innerHTML=`<button class="filter-btn ${currentFilterCat==='all'?'active':''}" onclick="filterCat('all',this)">すべて</button>`;
+  cats.forEach(c=>{wrap.innerHTML+=`<button class="filter-btn ${currentFilterCat===c?'active':''}" onclick="filterCat('${c.replace(/'/g,"\\'")}',this)">${c}</button>`;});
+}
+
+function filterCat(cat,btn) {
+  currentFilterCat=cat;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderList();
+}
+
+function renderList() {
+  const year=document.getElementById('f-year').value;
+  const month=document.getElementById('f-month').value;
+  let f=[...records];
+  if (currentFilterCat!=='all') f=f.filter(r=>catDisplay(r.category)===currentFilterCat);
+  if (year) f=f.filter(r=>String(r.date).startsWith(year));
+  if (month) f=f.filter(r=>String(r.date).split('-')[1]===month);
+  f.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const tbody=document.getElementById('records-body');
+  const empty=document.getElementById('l-empty');
+  document.getElementById('l-count').textContent=f.length+'件';
+  document.getElementById('l-total').textContent=f.length?'按分後合計 '+fmt(f.reduce((s,r)=>s+toNum(r.adjusted),0)):'';
+  if (!f.length){tbody.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  const pb={'現金':'bgr','クレジットカード':'bb','銀行振込':'bg','電子マネー':'bo','口座引落':'bpu'};
+  tbody.innerHTML=f.map(r=>`<tr>
+    <td style="white-space:nowrap">${r.date}</td>
+    <td><span class="badge bg">${catDisplay(r.category)}</span></td>
+    <td>${r.memo}</td>
+    <td><span class="badge ${pb[r.payment]||'bgr'}">${r.payment}</span></td>
+    <td class="amount-cell">${fmt(toNum(r.adjusted))}${toNum(r.ratio)<100?`<br><span style="font-size:10px;color:var(--text3)">(${r.ratio}%)</span>`:''}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-warning btn-sm" onclick="editRecord('${r.id}')" style="margin-right:4px">✏️</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')">🗑</button>
+    </td>
+  </tr>`).join('');
+}
+
+function renderKaigyohi() {
+  const tbody=document.getElementById('k-body');
+  const empty=document.getElementById('k-empty');
+  const sorted=[...kaigyohi].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const total=kaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
+  document.getElementById('k-total-disp').textContent='合計 '+fmt(total);
+  if (!sorted.length){tbody.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  tbody.innerHTML=sorted.map(k=>`<tr ${k.moved?'style="opacity:.5"':''}>
+    <td>${k.date}</td>
+    <td><span class="badge bo">${k.category}</span></td>
+    <td>${k.memo}${k.moved?'<span class="badge bg" style="margin-left:4px">経費済み</span>':''}</td>
+    <td class="amount-cell">${fmt(toNum(k.amount))}</td>
+    <td style="white-space:nowrap;display:flex;gap:4px;flex-wrap:wrap">
+      ${!k.moved?`<button class="btn btn-primary btn-sm" onclick="moveKaigyohiToExpense('${k.id}')" title="経費シートに移動">→経費</button>`:''}
+      <button class="btn btn-warning btn-sm" onclick="editKaigyohi('${k.id}')">✏️</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteKaigyohi('${k.id}')">🗑</button>
+    </td>
+  </tr>`).join('');
+}
+
+function renderIncomes() {
+  const tbody=document.getElementById('inc-body');
+  const empty=document.getElementById('inc-empty');
+  const sorted=[...incomes].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const total=incomes.reduce((s,i)=>s+toNum(i.amount),0);
+  document.getElementById('inc-total-disp').textContent='合計 '+fmt(total);
+  if (!sorted.length){tbody.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  const tb={'売上':'bg','補助金':'bb','給付金':'bo','助成金':'bpu','家賃収入':'bg','その他収入':'bgr'};
+  tbody.innerHTML=sorted.map(i=>`<tr>
+    <td>${i.date}</td>
+    <td><span class="badge ${tb[i.type]||'bgr'}">${i.type}</span></td>
+    <td>${i.memo}</td>
+    <td class="amount-cell">${fmt(toNum(i.amount))}</td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-warning btn-sm" onclick="editIncome('${i.id}')" style="margin-right:4px">✏️</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteIncome('${i.id}')">🗑</button>
+    </td>
+  </tr>`).join('');
+}
+
+function renderDeprec() {
+  const tbody=document.getElementById('dep-body');
+  const empty=document.getElementById('dep-empty');
+  const total=deprec.reduce((s,d)=>s+toNum(d.annual),0);
+  document.getElementById('dep-total-disp').textContent='年間償却 '+fmt(total);
+  if (!deprec.length){tbody.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+  tbody.innerHTML=deprec.map(d=>`<tr>
+    <td>${d.date}</td>
+    <td>${d.name}</td>
+    <td class="amount-cell">${fmt(toNum(d.cost))}</td>
+    <td>${d.years}年（${d.method}）</td>
+    <td class="amount-cell" style="color:var(--purple)">${fmt(toNum(d.annual))}</td>
+    <td><button class="btn btn-danger btn-sm" onclick="deleteDeprec('${d.id}')">🗑</button></td>
+  </tr>`).join('');
+}
+
+function renderReport() {
+  const year=(document.getElementById('r-year')||{value:'2026'}).value;
+  const yr=records.filter(r=>String(r.date).startsWith(year));
+  const incYr=incomes.filter(i=>String(i.date).startsWith(year));
+  const expTotal=yr.reduce((s,r)=>s+toNum(r.adjusted),0);
+  const incTotal=incYr.reduce((s,i)=>s+toNum(i.amount),0);
+  const kTotal=kaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
+  document.getElementById('r-inc-total').textContent=fmt(incTotal);
+  document.getElementById('r-exp-total').textContent=fmt(expTotal);
+  const profit=incTotal-expTotal;
+  const profitEl=document.getElementById('r-profit');
+  profitEl.textContent=fmt(profit);
+  profitEl.style.color=profit>=0?'var(--accent)':'var(--red)';
+  document.getElementById('r-k-total').textContent=fmt(kTotal);
+  const catMap={};
+  yr.forEach(r=>{const k=catDisplay(r.category);catMap[k]=(catMap[k]||0)+toNum(r.adjusted);});
+  const sorted=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('r-by-cat').innerHTML=sorted.length===0
+    ?'<p style="color:var(--text3);text-align:center;padding:16px">データがありません</p>'
+    :`<table style="width:100%"><thead><tr><th>科目</th><th style="text-align:right">按分後合計</th><th style="text-align:right">割合</th></tr></thead><tbody>${sorted.map(([cat,amt])=>`<tr><td>${cat}</td><td class="amount-cell">${fmt(amt)}</td><td class="amount-cell" style="color:var(--text3)">${expTotal?Math.round(amt/expTotal*100):0}%</td></tr>`).join('')}<tr style="font-weight:700;border-top:2px solid var(--border)"><td>合計</td><td class="amount-cell" style="color:var(--red)">${fmt(expTotal)}</td><td></td></tr></tbody></table>`;
+  const incMap={};
+  incYr.forEach(i=>{incMap[i.type]=(incMap[i.type]||0)+toNum(i.amount);});
+  const incSorted=Object.entries(incMap).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('r-by-income').innerHTML=incSorted.length===0
+    ?'<p style="color:var(--text3);text-align:center;padding:16px">収入データがありません</p>'
+    :`<table style="width:100%"><thead><tr><th>種類</th><th style="text-align:right">合計</th></tr></thead><tbody>${incSorted.map(([t,a])=>`<tr><td>${t}</td><td class="amount-cell">${fmt(a)}</td></tr>`).join('')}<tr style="font-weight:700;border-top:2px solid var(--border)"><td>合計</td><td class="amount-cell" style="color:var(--blue)">${fmt(incTotal)}</td></tr></tbody></table>`;
+  const months=Array.from({length:12},(_,i)=>i+1);
+  let rows='';
+  months.forEach(m=>{
+    const key=year+'-'+String(m).padStart(2,'0');
+    const mr=yr.filter(r=>String(r.date).startsWith(key));
+    const ir=incYr.filter(i=>String(i.date).startsWith(key));
+    if (!mr.length&&!ir.length) return;
+    rows+=`<tr><td>${m}月</td><td class="amount-cell">${fmt(mr.reduce((s,r)=>s+toNum(r.adjusted),0))}</td><td class="amount-cell" style="color:var(--blue)">${fmt(ir.reduce((s,i)=>s+toNum(i.amount),0))}</td><td>${mr.length}件</td></tr>`;
+  });
+  document.getElementById('r-monthly').innerHTML=rows||'<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:16px">データなし</td></tr>';
+  const depTotal=deprec.reduce((s,d)=>s+toNum(d.annual),0);
+  document.getElementById('r-k').innerHTML=`
+    ${kTotal>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--orange-light);border-radius:8px;border:1px solid #fcd34d;margin-bottom:8px"><div><strong>開業費合計</strong><br><span style="font-size:12px;color:var(--text3)">${kaigyohi.length}件 ／ 利益が出た年に任意償却できます</span></div><div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:var(--orange)">${fmt(kTotal)}</div></div>`:'<p style="color:var(--text3);font-size:13px;padding:8px 0">開業費の登録がありません</p>'}
+    ${depTotal>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--purple-light);border-radius:8px;border:1px solid #c4b5fd"><div><strong>減価償却（年間）</strong><br><span style="font-size:12px;color:var(--text3)">${deprec.length}件</span></div><div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:var(--purple)">${fmt(depTotal)}</div></div>`:''}`;
+}
+
+function renderGuide() {
+  const el=document.getElementById('guide-cards');
+  if (!el) return;
+  el.innerHTML=guideData.map(g=>`<div class="card" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:22px">${g.icon}</span><div><div style="font-weight:700;font-size:14px">${g.cat}</div><div style="font-size:11px;color:var(--text3)">${g.note}</div></div></div><div style="background:var(--surface2);border-radius:7px;padding:9px 11px;font-size:13px;color:var(--text2)"><strong>例：</strong>${g.ex}</div></div>`).join('');
+}
+
+// ══ NAVIGATION ══
+function showSection(id, btn) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.main-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('section-'+id).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (id==='list'){ renderList(); renderFilterButtons(); }
+  if (id==='report') renderReport();
+  if (id==='kaigyohi') renderKaigyohi();
+  if (id==='income') renderIncomes();
+  if (id==='deprec') renderDeprec();
+  if (id==='dashboard') renderDashboard();
+}
+
+// ══ UTILS ══
+function fmt(n){ return '¥'+Math.round(n||0).toLocaleString('ja-JP'); }
+function toNum(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+function showLoading(msg){ document.getElementById('loading-msg').textContent=msg||''; document.getElementById('loading').style.display='flex'; }
+function hideLoading(){ document.getElementById('loading').style.display='none'; }
+
+// ══ INIT ══
+(function init(){
+  const savedUrl = localStorage.getItem('keiji_gas_url');
+  if (savedUrl) {
+    GAS_URL = savedUrl;
+    document.getElementById('gas-url-input').value = savedUrl;
+    startApp();
+  }
+})();
+</script>
+</body>
+</html>
