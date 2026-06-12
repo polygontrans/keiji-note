@@ -987,16 +987,17 @@ function renderChecklist() {
   const items = 按分設定.checklist || defaultChecklist;
   if (!items.length) { el.innerHTML = '<p style="color:var(--text3);font-size:13px;text-align:center;padding:12px">チェック項目がありません</p>'; return; }
   el.innerHTML = items.map((item,idx)=>{
-    const found = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
-    const total = found.reduce((s,r)=>s+toNum(r.adjusted),0);
-    const done = found.length>0;
+    const foundRecords = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
+    const foundKaigyohi = kaigyohi.filter(k=>k.note && k.note.indexOf('経費より移動: '+item.category)===0 && String(k.date).startsWith(ym));
+    const total = foundRecords.reduce((s,r)=>s+toNum(r.adjusted),0) + foundKaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
+    const done = foundRecords.length>0 || foundKaigyohi.length>0;
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap">
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:18px">${item.icon}</span>
         <span style="font-size:13px;font-weight:500">${item.name}</span>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
-        ${done?`<span class="badge bg">✅ ${fmt(total)}</span>`:`<span class="badge bgr">⚠️ 未入力</span><button class="btn btn-primary btn-sm" onclick="quickAddChecklist(${idx})">入力する</button>`}
+        ${done?`<span class="badge bg">✅ ${fmt(total)}${foundKaigyohi.length?'（開業費含む）':''}</span>`:`<span class="badge bgr">⚠️ 未入力</span><button class="btn btn-primary btn-sm" onclick="quickAddChecklist(${idx})">入力する</button>`}
         <button class="btn btn-danger btn-sm" onclick="removeChecklistItem(${idx})" title="チェック項目を削除">✕</button>
       </div>
     </div>`;
@@ -1048,10 +1049,12 @@ function renderChecklistHistory() {
   months.forEach(ym => {
     html += `<tr><td style="white-space:nowrap;font-weight:700">${ym}</td>`;
     items.forEach(item => {
-      const found = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
-      if (found.length) {
-        const total = found.reduce((s,r)=>s+toNum(r.adjusted),0);
-        html += `<td class="amount-cell" style="color:var(--accent)">${fmt(total)}</td>`;
+      const foundRecords = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
+      const foundKaigyohi = kaigyohi.filter(k=>k.note && k.note.indexOf('経費より移動: '+item.category)===0 && String(k.date).startsWith(ym));
+      if (foundRecords.length || foundKaigyohi.length) {
+        const total = foundRecords.reduce((s,r)=>s+toNum(r.adjusted),0) + foundKaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
+        const label = foundKaigyohi.length ? `${fmt(total)}<br><span style="font-size:10px;color:var(--text3)">(開業費)</span>` : fmt(total);
+        html += `<td class="amount-cell" style="color:var(--accent)">${label}</td>`;
       } else {
         html += `<td style="text-align:center"><button class="btn btn-secondary btn-sm" onclick="quickAddForMonth('${item.category}','${ym}')" title="${item.name}を${ym}分として入力">＋</button></td>`;
       }
