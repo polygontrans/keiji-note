@@ -784,6 +784,7 @@ async function loadData() {
       setSyncStatus('ok');
       renderDashboard(); renderList(); renderKaigyohi();
       renderIncomes(); renderReport(); renderFilterButtons(); renderDeprec(); renderChecklist();
+      updateMonthly按分Placeholders();
     } else {
       setSyncStatus('error');
       alert('データの読み込みに失敗しました。\nエラー: ' + (result.error||'不明'));
@@ -873,6 +874,17 @@ function renderMonthly按分Rows() {
     </div>`).join('');
 }
 
+function updateMonthly按分Placeholders() {
+  monthly按分Items.forEach(item => {
+    const input = document.getElementById(`m-${item.key}-amount`);
+    if (!input) return;
+    const matches = records.filter(r=>r.category===item.category).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+    if (matches.length) {
+      input.placeholder = `前回(${matches[0].date}): ${fmt(matches[0].amount).replace('¥','')}円`;
+    }
+  });
+}
+
 function updateMonthly按分Preview(key) {
   const item = monthly按分Items.find(i=>i.key===key);
   const amountEl = document.getElementById(`m-${key}-amount`);
@@ -897,7 +909,7 @@ async function registerMonthly按分(key) {
   const note = item.ratioType==='area'
     ? `家事按分: ${item.label}${fmt(amount)} × ${ratio}%（面積按分: 仕事スペース${按分設定.areaWork}㎡ ÷ 全体${按分設定.areaTotal}㎡）`
     : `家事按分: ${item.label}${fmt(amount)} × ${ratio}%（時間按分: 1日${按分設定.timeHours}時間÷24時間 × 週${按分設定.timeDays}日÷7日）`;
-  const record = {id:Date.now(), date, category:item.category, memo:item.label+'（家事按分）', payment:'口座引落', amount, ratio, adjusted, note};
+  const record = {id:Date.now(), date, category:item.category, memo:item.label+'（家事按分）', payment:'クレジットカード', amount, ratio, adjusted, note};
   showLoading('経費に登録中…');
   try {
     const result = await gasRequest({action:'addRecord', record});
@@ -906,6 +918,7 @@ async function registerMonthly按分(key) {
       document.getElementById(`m-${key}-amount`).value='';
       document.getElementById(`m-${key}-preview`).style.display='none';
       renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
+      updateMonthly按分Placeholders();
       alert(`✅ ${item.label}を経費に登録しました！\n内容は「一覧」タブから後で修正できます。`);
     } else { alert('登録に失敗しました: '+(result.error||'')); }
   } catch(e){ alert('エラー: '+e.message); }
