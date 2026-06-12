@@ -154,6 +154,34 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
   <div style="font-size:14px;color:var(--text2)" id="loading-msg">読み込み中…</div>
 </div>
 
+<!-- CHECKLIST MODAL -->
+<div class="modal-backdrop" id="checklist-modal" style="display:none">
+  <div class="modal">
+    <div class="modal-title">固定費チェック項目を追加 <button class="modal-close" onclick="closeChecklistModal()">✕</button></div>
+    <div class="form-grid">
+      <div class="form-group full"><label>項目名 <span class="req">*</span></label><input type="text" id="cl-name" placeholder="例：Adobe Creative Cloud"></div>
+      <div class="form-group"><label>アイコン</label><input type="text" id="cl-icon" placeholder="📌" maxlength="2" value="📌"></div>
+      <div class="form-group">
+        <label>勘定科目</label>
+        <select id="cl-cat">
+          <option value="通信費_AI">🤖 AIサービス</option>
+          <option value="諸会費_デザイン">🎨 デザインツール</option>
+          <option value="諸会費_クラウド">☁️ クラウドツール</option>
+          <option value="通信費_ドメイン">🌐 ドメイン・サーバー</option>
+          <option value="地代家賃_按分">🏠 家賃（按分）</option>
+          <option value="水道光熱費_按分">💡 電気代（按分）</option>
+          <option value="通信費_按分_net">🌐 ネット代（按分）</option>
+          <option value="通信費_按分_phone">📱 スマホ代（按分）</option>
+          <option value="損害保険料">🛡 損害保険料</option>
+          <option value="諸会費">📋 諸会費</option>
+          <option value="雑費">📎 雑費</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:14px"><button class="btn btn-primary" onclick="addChecklistItem()">追加</button></div>
+  </div>
+</div>
+
 <!-- SETUP -->
 <div id="setup-screen">
 <div class="setup-card">
@@ -225,6 +253,14 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
     <div class="stat-box"><div class="stat-label">減価償却（年間）</div><div class="stat-value purple" id="s-deprec">¥0</div></div>
   </div>
   <div class="card"><div class="card-title">🗂 科目別内訳</div><div id="breakdown-list"></div></div>
+  <div class="card">
+    <div class="card-title" style="justify-content:space-between">
+      <span>📅 今月の固定費チェック</span>
+      <button class="btn btn-secondary btn-sm" onclick="openChecklistEditor()" style="text-transform:none;font-weight:500">＋ 項目を追加</button>
+    </div>
+    <div class="hint" style="margin-bottom:8px">毎月かかる費用の入力漏れを防ぐためのチェックリストです（経費一覧には影響しません）</div>
+    <div id="checklist-items"></div>
+  </div>
   <div class="card"><div class="card-title">🕐 最近の入力</div><div id="recent-list"></div></div>
 </div>
 
@@ -450,43 +486,84 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
 
 <!-- 家事按分 -->
 <div id="section-按分" class="section">
-  <div class="alert as">🏠 <div><strong>家事按分とは</strong>：自宅で仕事をしている場合、家賃・電気代・ネット代・スマホ代を「仕事で使う割合」だけ経費にできます。</div></div>
+  <div class="alert as">🏠 <div><strong>家事按分とは</strong>：自宅で仕事をしている場合、家賃・電気代・ネット代・スマホ代を「仕事で使う割合」だけ経費にできます。<strong>家賃は面積</strong>、<strong>電気・ネット・スマホは時間</strong>で計算するのが一般的です。</div></div>
   <div class="alert ar">❌ <div><strong>ガス・水道代は経費にできません</strong>（税務署は「仕事でガス・水は使わない」と判断します）。</div></div>
+
+  <!-- 割合設定：家賃（面積按分） -->
   <div class="按分card">
-    <div class="card-title">⚙️ 按分割合の設定</div>
-    <div style="margin-bottom:16px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text2)">計算方法を選んでください</div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="按分method" value="面積" onchange="update按分Method()" checked> 部屋の面積で計算</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="按分method" value="時間" onchange="update按分Method()"> 使用時間で計算</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="按分method" value="手動" onchange="update按分Method()"> 割合を直接入力</label>
+    <div class="card-title">🏠 家賃用の按分割合（面積按分）</div>
+    <div class="按分row">
+      <div class="form-group"><label>自宅全体の面積（㎡）</label><input type="number" id="area-total" placeholder="例：66.34" oninput="calcAreaRatio()"></div>
+      <div class="form-group"><label>仕事専用スペース（㎡）</label><input type="number" id="area-work" placeholder="例：6" oninput="calcAreaRatio()"></div>
+      <div class="form-group"><label>算出割合</label><input type="text" id="area-ratio-auto" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
+    </div>
+    <div class="form-group" style="max-width:260px;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="area-ratio-override" onchange="calcAreaRatio()" style="width:auto"> 割合を手動で上書きする</label>
+      <input type="number" id="area-ratio-manual" placeholder="例：9" min="1" max="100" oninput="calcAreaRatio()" style="margin-top:6px" disabled>
+    </div>
+    <div class="按分result" id="area-ratio-preview">面積を入力すると割合が自動計算されます</div>
+  </div>
+
+  <!-- 割合設定：電気・ネット・スマホ（時間按分） -->
+  <div class="按分card">
+    <div class="card-title">💡 電気・ネット・スマホ用の按分割合（時間按分）</div>
+    <div class="按分row">
+      <div class="form-group"><label>1日の仕事時間（時間）</label><input type="number" id="time-hours" placeholder="例：4" max="24" oninput="calcTimeRatio()"></div>
+      <div class="form-group"><label>週に仕事する日数</label><input type="number" id="time-days" placeholder="例：6" max="7" oninput="calcTimeRatio()"></div>
+      <div class="form-group"><label>算出割合</label><input type="text" id="time-ratio-auto" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
+    </div>
+    <div class="hint">計算式：仕事時間 ÷ 24時間 × 仕事日数 ÷ 7日（国税庁の在宅勤務費用FAQの考え方を参考にした目安）</div>
+    <div class="form-group" style="max-width:260px;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="time-ratio-override" onchange="calcTimeRatio()" style="width:auto"> 割合を手動で上書きする</label>
+      <input type="number" id="time-ratio-manual" placeholder="例：17" min="1" max="100" oninput="calcTimeRatio()" style="margin-top:6px" disabled>
+    </div>
+    <div class="按分result" id="time-ratio-preview">時間と日数を入力すると割合が自動計算されます</div>
+  </div>
+
+  <div style="text-align:right;margin-bottom:14px">
+    <button class="btn btn-primary" onclick="save按分Ratios()">💾 割合設定を保存</button>
+  </div>
+
+  <!-- 今月の按分経費を登録 -->
+  <div class="card">
+    <div class="card-title">📅 今月の家事按分経費を登録する</div>
+    <div class="alert ai">💡 <div>請求額がわかったら金額を入力 → 計算結果を確認して「経費に登録」を押すだけ。按分の内訳（割合の根拠）も自動でメモに記録され、後から経費一覧で編集できます。</div></div>
+    <div id="monthly按分-rows"></div>
+  </div>
+
+  <!-- カスタム按分 -->
+  <div class="card">
+    <div class="card-title">✨ カスタム按分（火災保険など、臨時で按分したいもの）</div>
+    <div class="form-grid">
+      <div class="form-group"><label>日付</label><input type="date" id="custom按分-date"></div>
+      <div class="form-group"><label>項目名 <span class="req">*</span></label><input type="text" id="custom按分-name" placeholder="例：火災保険料（年払い）"></div>
+      <div class="form-group"><label>金額（円） <span class="req">*</span></label><input type="number" id="custom按分-amount" min="0" oninput="updateCustom按分Preview()"></div>
+      <div class="form-group">
+        <label>使う割合</label>
+        <select id="custom按分-ratiotype" onchange="updateCustom按分Preview()">
+          <option value="area">家賃用の割合（面積按分）</option>
+          <option value="time">電気・ネット・スマホ用の割合（時間按分）</option>
+          <option value="manual">手動で入力</option>
+        </select>
+      </div>
+      <div class="form-group" id="custom按分-manual-wrap" style="display:none">
+        <label>割合（%）</label><input type="number" id="custom按分-manual" min="1" max="100" oninput="updateCustom按分Preview()">
+      </div>
+      <div class="form-group">
+        <label>勘定科目</label>
+        <select id="custom按分-cat">
+          <option value="損害保険料">🛡 損害保険料（火災保険など）</option>
+          <option value="水道光熱費_按分">💡 水道光熱費</option>
+          <option value="地代家賃_按分">🏠 地代家賃</option>
+          <option value="通信費">📶 通信費</option>
+          <option value="雑費">📎 雑費</option>
+        </select>
       </div>
     </div>
-    <div id="按分-面積" class="按分row">
-      <div class="form-group"><label>自宅全体の面積（㎡）</label><input type="number" id="按分-total-area" placeholder="例：60" oninput="calc按分()"></div>
-      <div class="form-group"><label>仕事専用スペース（㎡）</label><input type="number" id="按分-work-area" placeholder="例：12" oninput="calc按分()"></div>
-      <div class="form-group"><label>算出割合</label><input type="text" id="按分-area-result" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
+    <div id="custom按分-preview" class="按分result" style="display:none;margin-top:10px"></div>
+    <div style="margin-top:12px">
+      <button class="btn btn-primary" onclick="registerCustom按分()">💾 経費に登録</button>
     </div>
-    <div id="按分-時間" style="display:none" class="按分row">
-      <div class="form-group"><label>1日の仕事時間（時間）</label><input type="number" id="按分-work-hours" placeholder="例：8" oninput="calc按分()"></div>
-      <div class="form-group"><label>1日の在宅時間（時間）</label><input type="number" id="按分-home-hours" placeholder="例：16" oninput="calc按分()"></div>
-      <div class="form-group"><label>算出割合</label><input type="text" id="按分-time-result" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
-    </div>
-    <div id="按分-手動" style="display:none">
-      <div class="form-group" style="max-width:200px"><label>按分割合（%）</label><input type="number" id="按分-manual" placeholder="例：20" min="1" max="100" oninput="calc按分()"></div>
-    </div>
-    <div class="按分result" id="按分-preview">按分割合を設定すると自動計算されます</div>
-  </div>
-  <div class="card">
-    <div class="card-title">📝 毎月の固定費（月額を入力すると経費額を自動計算）</div>
-    <div class="form-grid">
-      <div class="form-group"><label>🏠 家賃（月額）</label><input type="number" id="fix-rent" placeholder="例：80000" oninput="updateFixedCosts()"></div>
-      <div class="form-group"><label>💡 電気代（月額目安）</label><input type="number" id="fix-elec" placeholder="例：8000" oninput="updateFixedCosts()"></div>
-      <div class="form-group"><label>🌐 インターネット代（月額）</label><input type="number" id="fix-net" placeholder="例：5000" oninput="updateFixedCosts()"></div>
-      <div class="form-group"><label>📱 スマホ代（月額）</label><input type="number" id="fix-phone" placeholder="例：3000" oninput="updateFixedCosts()"></div>
-    </div>
-    <div id="fixed-cost-result" style="margin-top:14px"></div>
-    <div style="margin-top:12px"><button class="btn btn-primary" onclick="saveFixedCosts()">💾 按分設定を保存</button></div>
   </div>
 </div>
 
@@ -595,7 +672,22 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
 let GAS_URL = '';
 let records = [], kaigyohi = [], incomes = [], deprec = [];
 let currentFilterCat = 'all';
-let 按分設定 = {ratio:0, rent:0, elec:0, net:0, phone:0};
+let 按分設定 = {areaTotal:0, areaWork:0, areaRatio:0, timeHours:0, timeDays:0, timeRatio:0, checklist:null};
+
+const defaultChecklist = [
+  {name:'家賃', icon:'🏠', category:'地代家賃_按分'},
+  {name:'電気代', icon:'💡', category:'水道光熱費_按分'},
+  {name:'インターネット代', icon:'🌐', category:'通信費_按分_net'},
+  {name:'スマホ代', icon:'📱', category:'通信費_按分_phone'},
+  {name:'AIサービス', icon:'🤖', category:'通信費_AI'},
+];
+
+const monthly按分Items = [
+  {key:'rent',  icon:'🏠', label:'家賃',          category:'地代家賃_按分',     ratioType:'area'},
+  {key:'elec',  icon:'💡', label:'電気代',         category:'水道光熱費_按分',   ratioType:'time'},
+  {key:'net',   icon:'🌐', label:'インターネット代', category:'通信費_按分_net',   ratioType:'time'},
+  {key:'phone', icon:'📱', label:'スマホ代',        category:'通信費_按分_phone', ratioType:'time'},
+];
 
 // カテゴリヒント
 const catHints = {
@@ -649,7 +741,8 @@ function resetSetup() {
 function startApp() {
   document.getElementById('setup-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
-  loadFixedCostSettings();
+  load按分Settings();
+  renderMonthly按分Rows();
   renderGuide();
   loadData();
   // デフォルト日付を今日に設定
@@ -690,7 +783,7 @@ async function loadData() {
       deprec   = (result.deprec   ||[]).map(d=>({...d, cost:toNum(d.cost), annual:toNum(d.annual)}));
       setSyncStatus('ok');
       renderDashboard(); renderList(); renderKaigyohi();
-      renderIncomes(); renderReport(); renderFilterButtons(); renderDeprec();
+      renderIncomes(); renderReport(); renderFilterButtons(); renderDeprec(); renderChecklist();
     } else {
       setSyncStatus('error');
       alert('データの読み込みに失敗しました。\nエラー: ' + (result.error||'不明'));
@@ -701,83 +794,229 @@ async function loadData() {
   } finally { hideLoading(); }
 }
 
-// ══ 家事按分 ══
-function update按分Method() {
-  const m = document.querySelector('input[name="按分method"]:checked').value;
-  document.getElementById('按分-面積').style.display = m==='面積'?'grid':'none';
-  document.getElementById('按分-時間').style.display = m==='時間'?'grid':'none';
-  document.getElementById('按分-手動').style.display = m==='手動'?'block':'none';
-  calc按分();
+// ══ 家事按分：割合の計算 ══
+function calcAreaRatio() {
+  const total = parseFloat(document.getElementById('area-total').value)||0;
+  const work  = parseFloat(document.getElementById('area-work').value)||0;
+  const override = document.getElementById('area-ratio-override').checked;
+  document.getElementById('area-ratio-manual').disabled = !override;
+  const auto = total>0 ? Math.round(work/total*1000)/10 : 0;
+  document.getElementById('area-ratio-auto').value = auto?auto+'%':'';
+  let ratio;
+  if (override) ratio = parseFloat(document.getElementById('area-ratio-manual').value)||0;
+  else ratio = auto;
+  按分設定.areaTotal=total; 按分設定.areaWork=work; 按分設定.areaRatio=ratio;
+  document.getElementById('area-ratio-preview').innerHTML = ratio
+    ? `家賃用の按分割合：<strong>${ratio}%</strong>${override?'（手動設定）':` （${work}㎡ ÷ ${total}㎡）`}`
+    : '面積を入力すると割合が自動計算されます';
+  updateAll按分Previews();
 }
 
-function calc按分() {
-  const m = document.querySelector('input[name="按分method"]:checked').value;
-  let ratio = 0;
-  if (m==='面積') {
-    const total = parseFloat(document.getElementById('按分-total-area').value)||0;
-    const work  = parseFloat(document.getElementById('按分-work-area').value)||0;
-    ratio = total>0 ? Math.round(work/total*100) : 0;
-    document.getElementById('按分-area-result').value = ratio+'%';
-  } else if (m==='時間') {
-    const work = parseFloat(document.getElementById('按分-work-hours').value)||0;
-    const home = parseFloat(document.getElementById('按分-home-hours').value)||0;
-    ratio = home>0 ? Math.round(work/home*100) : 0;
-    document.getElementById('按分-time-result').value = ratio+'%';
-  } else {
-    ratio = parseFloat(document.getElementById('按分-manual').value)||0;
-  }
-  按分設定.ratio = ratio;
-  updateFixedCosts();
+function calcTimeRatio() {
+  const hours = parseFloat(document.getElementById('time-hours').value)||0;
+  const days  = parseFloat(document.getElementById('time-days').value)||0;
+  const override = document.getElementById('time-ratio-override').checked;
+  document.getElementById('time-ratio-manual').disabled = !override;
+  const auto = (hours>0&&days>0) ? Math.round((hours/24)*(days/7)*1000)/10 : 0;
+  document.getElementById('time-ratio-auto').value = auto?auto+'%':'';
+  let ratio;
+  if (override) ratio = parseFloat(document.getElementById('time-ratio-manual').value)||0;
+  else ratio = auto;
+  按分設定.timeHours=hours; 按分設定.timeDays=days; 按分設定.timeRatio=ratio;
+  document.getElementById('time-ratio-preview').innerHTML = ratio
+    ? `電気・ネット・スマホ用の按分割合：<strong>${ratio}%</strong>${override?'（手動設定）':` （1日${hours}時間 × 週${days}日 ÷ 7日）`}`
+    : '時間と日数を入力すると割合が自動計算されます';
+  updateAll按分Previews();
 }
 
-function updateFixedCosts() {
-  const r = 按分設定.ratio||0;
-  const rent  = parseFloat(document.getElementById('fix-rent').value)||0;
-  const elec  = parseFloat(document.getElementById('fix-elec').value)||0;
-  const net   = parseFloat(document.getElementById('fix-net').value)||0;
-  const phone = parseFloat(document.getElementById('fix-phone').value)||0;
-  按分設定.rent=rent; 按分設定.elec=elec; 按分設定.net=net; 按分設定.phone=phone;
-  const ra=Math.round(rent*r/100), ea=Math.round(elec*r/100), na=Math.round(net*r/100), pa=Math.round(phone*r/100);
-  const total=ra+ea+na+pa;
-  const el=document.getElementById('fixed-cost-result');
-  if (!rent&&!elec&&!net&&!phone){el.innerHTML='';return;}
-  el.innerHTML=`<div style="background:#fff;border-radius:10px;border:1px solid var(--accent2);overflow:hidden">
-    <div style="background:var(--accent);color:#fff;padding:8px 14px;font-size:12px;font-weight:700">按分割合 ${r}% で計算した月額経費</div>
-    <div style="padding:12px 14px;display:grid;gap:6px">
-      ${rent?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>🏠 家賃 ${fmt(rent)} × ${r}%</span><strong style="color:var(--red)">${fmt(ra)}</strong></div>`:''}
-      ${elec?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>💡 電気代 ${fmt(elec)} × ${r}%</span><strong style="color:var(--red)">${fmt(ea)}</strong></div>`:''}
-      ${net?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>🌐 ネット ${fmt(net)} × ${r}%</span><strong style="color:var(--red)">${fmt(na)}</strong></div>`:''}
-      ${phone?`<div style="display:flex;justify-content:space-between;font-size:13px"><span>📱 スマホ ${fmt(phone)} × ${r}%</span><strong style="color:var(--red)">${fmt(pa)}</strong></div>`:''}
-      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
-        <span>月の家事按分経費合計</span><strong style="color:var(--accent);font-family:'DM Mono',monospace">${fmt(total)}</strong>
-      </div>
-      <div style="font-size:11px;color:var(--text3)">年間：${fmt(total*12)}</div>
-    </div>
-  </div>`;
-  document.getElementById('按分-preview').innerHTML=`按分割合 <strong>${r}%</strong> が設定されています。家事按分科目を選ぶと自動でこの割合が適用されます。`;
+function updateAll按分Previews() {
+  monthly按分Items.forEach(item=>updateMonthly按分Preview(item.key));
+  updateCustom按分Preview();
 }
 
-function saveFixedCosts() {
+function save按分Ratios() {
   localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
-  alert('✅ 按分設定を保存しました！');
+  alert('✅ 割合設定を保存しました！');
 }
 
-function loadFixedCostSettings() {
+function load按分Settings() {
   try {
     const saved = localStorage.getItem('keiji_按分');
     if (saved) {
-      按分設定 = JSON.parse(saved);
-      if (按分設定.rent) document.getElementById('fix-rent').value=按分設定.rent;
-      if (按分設定.elec) document.getElementById('fix-elec').value=按分設定.elec;
-      if (按分設定.net)  document.getElementById('fix-net').value=按分設定.net;
-      if (按分設定.phone)document.getElementById('fix-phone').value=按分設定.phone;
-      if (按分設定.ratio){
-        document.getElementById('按分-manual').value=按分設定.ratio;
-        document.querySelector('input[name="按分method"][value="手動"]').checked=true;
-        update按分Method();
-      }
+      const s = JSON.parse(saved);
+      Object.assign(按分設定, s);
+      if (按分設定.areaTotal) document.getElementById('area-total').value = 按分設定.areaTotal;
+      if (按分設定.areaWork)  document.getElementById('area-work').value  = 按分設定.areaWork;
+      if (按分設定.timeHours) document.getElementById('time-hours').value = 按分設定.timeHours;
+      if (按分設定.timeDays)  document.getElementById('time-days').value  = 按分設定.timeDays;
     }
   } catch(e){}
+  if (!按分設定.checklist) 按分設定.checklist = JSON.parse(JSON.stringify(defaultChecklist));
+  calcAreaRatio();
+  calcTimeRatio();
+}
+
+// ══ 家事按分：今月の経費入力 ══
+function renderMonthly按分Rows() {
+  const wrap = document.getElementById('monthly按分-rows');
+  if (!wrap) return;
+  const today = new Date().toISOString().split('T')[0];
+  wrap.innerHTML = monthly按分Items.map(item => `
+    <div class="card" style="background:var(--surface2);margin-bottom:10px;box-shadow:none">
+      <div style="font-weight:700;margin-bottom:8px;font-size:13px">${item.icon} ${item.label}</div>
+      <div class="form-grid">
+        <div class="form-group"><label>日付</label><input type="date" id="m-${item.key}-date" value="${today}"></div>
+        <div class="form-group"><label>今月の金額（円）</label><input type="number" id="m-${item.key}-amount" placeholder="請求額を入力" min="0" oninput="updateMonthly按分Preview('${item.key}')"></div>
+      </div>
+      <div class="按分result" id="m-${item.key}-preview" style="margin-top:8px;display:none"></div>
+      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="registerMonthly按分('${item.key}')">💾 経費に登録</button></div>
+    </div>`).join('');
+}
+
+function updateMonthly按分Preview(key) {
+  const item = monthly按分Items.find(i=>i.key===key);
+  const amountEl = document.getElementById(`m-${key}-amount`);
+  if (!amountEl) return;
+  const amount = parseFloat(amountEl.value)||0;
+  const ratio = item.ratioType==='area' ? 按分設定.areaRatio : 按分設定.timeRatio;
+  const preview = document.getElementById(`m-${key}-preview`);
+  if (!amount || !ratio) { preview.style.display='none'; return; }
+  const adjusted = Math.round(amount*ratio/100);
+  preview.style.display='block';
+  preview.innerHTML = `${item.label} ${fmt(amount)} × <strong>${ratio}%</strong>（${item.ratioType==='area'?'面積':'時間'}按分） ＝ <strong style="color:var(--accent);font-family:'DM Mono',monospace;font-size:15px">${fmt(adjusted)}</strong>`;
+}
+
+async function registerMonthly按分(key) {
+  const item = monthly按分Items.find(i=>i.key===key);
+  const date = document.getElementById(`m-${key}-date`).value;
+  const amount = parseFloat(document.getElementById(`m-${key}-amount`).value)||0;
+  if (!date || !amount) { alert('日付と金額を入力してください'); return; }
+  const ratio = item.ratioType==='area' ? 按分設定.areaRatio : 按分設定.timeRatio;
+  if (!ratio) { alert('先に按分割合を設定して「割合設定を保存」を押してください'); return; }
+  const adjusted = Math.round(amount*ratio/100);
+  const note = item.ratioType==='area'
+    ? `家事按分: ${item.label}${fmt(amount)} × ${ratio}%（面積按分: 仕事スペース${按分設定.areaWork}㎡ ÷ 全体${按分設定.areaTotal}㎡）`
+    : `家事按分: ${item.label}${fmt(amount)} × ${ratio}%（時間按分: 1日${按分設定.timeHours}時間÷24時間 × 週${按分設定.timeDays}日÷7日）`;
+  const record = {id:Date.now(), date, category:item.category, memo:item.label+'（家事按分）', payment:'口座引落', amount, ratio, adjusted, note};
+  showLoading('経費に登録中…');
+  try {
+    const result = await gasRequest({action:'addRecord', record});
+    if (result.ok) {
+      records.push(record);
+      document.getElementById(`m-${key}-amount`).value='';
+      document.getElementById(`m-${key}-preview`).style.display='none';
+      renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
+      alert(`✅ ${item.label}を経費に登録しました！\n内容は「一覧」タブから後で修正できます。`);
+    } else { alert('登録に失敗しました: '+(result.error||'')); }
+  } catch(e){ alert('エラー: '+e.message); }
+  finally { hideLoading(); }
+}
+
+// ══ 家事按分：カスタム ══
+function updateCustom按分Preview() {
+  const amount = parseFloat(document.getElementById('custom按分-amount').value)||0;
+  const ratioType = document.getElementById('custom按分-ratiotype').value;
+  document.getElementById('custom按分-manual-wrap').style.display = ratioType==='manual'?'block':'none';
+  let ratio;
+  if (ratioType==='area') ratio = 按分設定.areaRatio;
+  else if (ratioType==='time') ratio = 按分設定.timeRatio;
+  else ratio = parseFloat(document.getElementById('custom按分-manual').value)||0;
+  const preview = document.getElementById('custom按分-preview');
+  if (!amount || !ratio) { preview.style.display='none'; return; }
+  const adjusted = Math.round(amount*ratio/100);
+  preview.style.display='block';
+  preview.innerHTML = `${fmt(amount)} × <strong>${ratio}%</strong> ＝ <strong style="color:var(--accent);font-family:'DM Mono',monospace;font-size:15px">${fmt(adjusted)}</strong>`;
+}
+
+async function registerCustom按分() {
+  const date = document.getElementById('custom按分-date').value;
+  const name = document.getElementById('custom按分-name').value.trim();
+  const amount = parseFloat(document.getElementById('custom按分-amount').value)||0;
+  const ratioType = document.getElementById('custom按分-ratiotype').value;
+  const category = document.getElementById('custom按分-cat').value;
+  if (!date||!name||!amount) { alert('日付・項目名・金額は必須です'); return; }
+  let ratio, methodLabel;
+  if (ratioType==='area') { ratio=按分設定.areaRatio; methodLabel=`面積按分: 仕事スペース${按分設定.areaWork}㎡÷全体${按分設定.areaTotal}㎡`; }
+  else if (ratioType==='time') { ratio=按分設定.timeRatio; methodLabel=`時間按分: 1日${按分設定.timeHours}時間÷24時間 × 週${按分設定.timeDays}日÷7日`; }
+  else { ratio=parseFloat(document.getElementById('custom按分-manual').value)||0; methodLabel='手動入力'; }
+  if (!ratio) { alert('按分割合が設定されていません'); return; }
+  const adjusted = Math.round(amount*ratio/100);
+  const note = `家事按分: ${name}${fmt(amount)} × ${ratio}%（${methodLabel}）`;
+  const record = {id:Date.now(), date, category, memo:name+'（家事按分）', payment:'口座引落', amount, ratio, adjusted, note};
+  showLoading('経費に登録中…');
+  try {
+    const result = await gasRequest({action:'addRecord', record});
+    if (result.ok) {
+      records.push(record);
+      ['custom按分-name','custom按分-amount'].forEach(id=>document.getElementById(id).value='');
+      document.getElementById('custom按分-preview').style.display='none';
+      renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
+      alert('✅ 経費に登録しました！');
+    } else { alert('登録に失敗しました: '+(result.error||'')); }
+  } catch(e){ alert('エラー: '+e.message); }
+  finally { hideLoading(); }
+}
+
+// ══ 今月の固定費チェックリスト ══
+function renderChecklist() {
+  const el = document.getElementById('checklist-items');
+  if (!el) return;
+  const now = new Date();
+  const ym = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const items = 按分設定.checklist || defaultChecklist;
+  if (!items.length) { el.innerHTML = '<p style="color:var(--text3);font-size:13px;text-align:center;padding:12px">チェック項目がありません</p>'; return; }
+  el.innerHTML = items.map((item,idx)=>{
+    const found = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
+    const total = found.reduce((s,r)=>s+toNum(r.adjusted),0);
+    const done = found.length>0;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">${item.icon}</span>
+        <span style="font-size:13px;font-weight:500">${item.name}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        ${done?`<span class="badge bg">✅ ${fmt(total)}</span>`:`<span class="badge bgr">⚠️ 未入力</span><button class="btn btn-primary btn-sm" onclick="quickAddChecklist(${idx})">入力する</button>`}
+        <button class="btn btn-danger btn-sm" onclick="removeChecklistItem(${idx})" title="チェック項目を削除">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function quickAddChecklist(idx) {
+  const item = (按分設定.checklist||defaultChecklist)[idx];
+  const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
+  if (按分Cats.includes(item.category)) {
+    showSection('按分', document.querySelectorAll('.main-tab')[5]);
+  } else {
+    showSection('add', document.querySelectorAll('.main-tab')[1]);
+    document.getElementById('i-cat').value = item.category;
+    onCatChange();
+    if (!document.getElementById('i-memo').value) document.getElementById('i-memo').value = item.name;
+  }
+  window.scrollTo(0,0);
+}
+
+function openChecklistEditor() { document.getElementById('checklist-modal').style.display='flex'; }
+function closeChecklistModal() { document.getElementById('checklist-modal').style.display='none'; }
+
+function addChecklistItem() {
+  const name = document.getElementById('cl-name').value.trim();
+  const icon = document.getElementById('cl-icon').value.trim()||'📌';
+  const category = document.getElementById('cl-cat').value;
+  if (!name) { alert('項目名を入力してください'); return; }
+  if (!按分設定.checklist) 按分設定.checklist = JSON.parse(JSON.stringify(defaultChecklist));
+  按分設定.checklist.push({name, icon, category});
+  localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
+  document.getElementById('cl-name').value='';
+  closeChecklistModal();
+  renderChecklist();
+}
+
+function removeChecklistItem(idx) {
+  if (!confirm('このチェック項目を削除しますか？（経費データは消えません）')) return;
+  按分設定.checklist.splice(idx,1);
+  localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
+  renderChecklist();
 }
 
 // ══ 経費入力 ══
@@ -786,14 +1025,15 @@ function onCatChange() {
   document.getElementById('cat-hint').textContent = catHints[cat]||'';
   const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
   if (按分Cats.includes(cat)) {
-    const r = 按分設定.ratio||20;
-    document.getElementById('i-ratio').value = [100,80,50,30,20].includes(r) ? String(r) : 'custom';
-    document.getElementById('i-ratio-custom').value = r;
-    document.getElementById('custom-ratio-wrap').style.display = 'block';
-    document.getElementById('ratio-hint').textContent = `家事按分${r}%が自動設定されました`;
-    const amtMap = {'地代家賃_按分':按分設定.rent,'水道光熱費_按分':按分設定.elec,'通信費_按分_net':按分設定.net,'通信費_按分_phone':按分設定.phone};
-    const autoAmt = amtMap[cat];
-    if (autoAmt) document.getElementById('i-amount').value = autoAmt;
+    const r = cat==='地代家賃_按分' ? (按分設定.areaRatio||0) : (按分設定.timeRatio||0);
+    if (r) {
+      document.getElementById('i-ratio').value = [100,80,50,30,20].includes(r) ? String(r) : 'custom';
+      document.getElementById('i-ratio-custom').value = r;
+      document.getElementById('custom-ratio-wrap').style.display = 'block';
+      document.getElementById('ratio-hint').textContent = `家事按分${r}%が自動設定されました（「家事按分」タブで設定した割合）`;
+    } else {
+      document.getElementById('ratio-hint').innerHTML = `按分割合が未設定です。「🏠家事按分」タブで設定してください。`;
+    }
   } else {
     document.getElementById('ratio-hint').textContent = '';
     document.getElementById('custom-ratio-wrap').style.display = 'none';
@@ -913,6 +1153,31 @@ async function deleteRecord(id) {
     const result = await gasRequest({action:'delRecord', id});
     if (result.ok) { records=records.filter(r=>String(r.id)!==String(id)); renderList(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
   } catch(e){ alert('削除に失敗しました'); }
+  finally { hideLoading(); }
+}
+
+// ── 経費 → 開業費へ戻す ──
+async function moveExpenseToKaigyohi(id) {
+  const r = records.find(r=>String(r.id)===String(id));
+  if (!r) return;
+  if (!confirm(`「${r.memo}」（${fmt(r.adjusted)}）を開業費に戻しますか？\n今年の経費からは削除され、開業費リストに移動します。`)) return;
+  showLoading('開業費に戻しています…');
+  try {
+    const result = await gasRequest({action:'moveToKaigyohi', id});
+    if (result.ok) {
+      records = records.filter(rec=>String(rec.id)!==String(id));
+      if (result.restored) {
+        // 元々開業費から移動したものを復元
+        const idx = kaigyohi.findIndex(k=>String(k.id)===String(result.kaigyohiId));
+        if (idx>=0) kaigyohi[idx].moved = false;
+      } else {
+        // 新規に開業費として登録
+        kaigyohi.push({id:String(result.newKaigyohiId), date:r.date, category:'その他開業費', memo:r.memo, amount:r.amount, note:'経費より移動: '+r.category, moved:false});
+      }
+      renderList(); renderKaigyohi(); renderDashboard(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
+      alert('✅ 開業費に戻しました！');
+    } else { alert('移動に失敗しました: '+(result.error||'')); }
+  } catch(e){ alert('エラー: '+e.message); }
   finally { hideLoading(); }
 }
 
@@ -1233,8 +1498,9 @@ function renderList() {
     <td><span class="badge ${pb[r.payment]||'bgr'}">${r.payment}</span></td>
     <td class="amount-cell">${fmt(toNum(r.adjusted))}${toNum(r.ratio)<100?`<br><span style="font-size:10px;color:var(--text3)">(${r.ratio}%)</span>`:''}</td>
     <td style="white-space:nowrap">
-      <button class="btn btn-warning btn-sm" onclick="editRecord('${r.id}')" style="margin-right:4px">✏️</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')">🗑</button>
+      <button class="btn btn-warning btn-sm" onclick="editRecord('${r.id}')" style="margin:1px">✏️</button>
+      <button class="btn btn-purple btn-sm" onclick="moveExpenseToKaigyohi('${r.id}')" style="margin:1px" title="開業費へ戻す">🌱開業費へ</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')" style="margin:1px">🗑</button>
     </td>
   </tr>`).join('');
 }
