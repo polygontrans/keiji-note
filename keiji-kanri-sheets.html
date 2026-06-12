@@ -260,6 +260,10 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
     </div>
     <div class="hint" style="margin-bottom:8px">毎月かかる費用の入力漏れを防ぐためのチェックリストです（経費一覧には影響しません）</div>
     <div id="checklist-items"></div>
+    <div style="margin-top:10px;text-align:center">
+      <button class="btn btn-secondary btn-sm" onclick="toggleChecklistHistory()" id="checklist-history-toggle">📜 過去の入力履歴を確認（2024年〜）</button>
+    </div>
+    <div id="checklist-history" style="display:none;margin-top:12px"></div>
   </div>
   <div class="card"><div class="card-title">🕐 最近の入力</div><div id="recent-list"></div></div>
 </div>
@@ -785,6 +789,7 @@ async function loadData() {
       renderDashboard(); renderList(); renderKaigyohi();
       renderIncomes(); renderReport(); renderFilterButtons(); renderDeprec(); renderChecklist();
       updateMonthly按分Placeholders();
+      if (document.getElementById('checklist-history').style.display !== 'none') renderChecklistHistory();
     } else {
       setSyncStatus('error');
       alert('データの読み込みに失敗しました。\nエラー: ' + (result.error||'不明'));
@@ -918,7 +923,8 @@ async function registerMonthly按分(key) {
       document.getElementById(`m-${key}-amount`).value='';
       document.getElementById(`m-${key}-preview`).style.display='none';
       renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
-      updateMonthly按分Placeholders();
+      updateMonthly按分Placeholders(); renderChecklist();
+      if (document.getElementById('checklist-history').style.display !== 'none') renderChecklistHistory();
       alert(`✅ ${item.label}を経費に登録しました！\n内容は「一覧」タブから後で修正できます。`);
     } else { alert('登録に失敗しました: '+(result.error||'')); }
   } catch(e){ alert('エラー: '+e.message); }
@@ -964,6 +970,8 @@ async function registerCustom按分() {
       ['custom按分-name','custom按分-amount'].forEach(id=>document.getElementById(id).value='');
       document.getElementById('custom按分-preview').style.display='none';
       renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
+      renderChecklist();
+      if (document.getElementById('checklist-history').style.display !== 'none') renderChecklistHistory();
       alert('✅ 経費に登録しました！');
     } else { alert('登録に失敗しました: '+(result.error||'')); }
   } catch(e){ alert('エラー: '+e.message); }
@@ -1005,6 +1013,73 @@ function quickAddChecklist(idx) {
     document.getElementById('i-cat').value = item.category;
     onCatChange();
     if (!document.getElementById('i-memo').value) document.getElementById('i-memo').value = item.name;
+  }
+  window.scrollTo(0,0);
+}
+
+// ── 過去の入力履歴（2024年〜） ──
+function toggleChecklistHistory() {
+  const el = document.getElementById('checklist-history');
+  const btn = document.getElementById('checklist-history-toggle');
+  if (el.style.display === 'none') {
+    renderChecklistHistory();
+    el.style.display = 'block';
+    btn.textContent = '📜 履歴を閉じる';
+  } else {
+    el.style.display = 'none';
+    btn.textContent = '📜 過去の入力履歴を確認（2024年〜）';
+  }
+}
+
+function renderChecklistHistory() {
+  const el = document.getElementById('checklist-history');
+  const items = 按分設定.checklist || defaultChecklist;
+  const now = new Date();
+  const months = [];
+  let y = 2024, m = 1;
+  while (y < now.getFullYear() || (y === now.getFullYear() && m <= now.getMonth()+1)) {
+    months.push(y + '-' + String(m).padStart(2,'0'));
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  months.reverse();
+
+  let html = `<div class="hint" style="margin-bottom:8px">「＋」は未入力の月です。クリックすると入力画面に移動します（日付はその月の28日が入ります）。</div>`;
+  html += `<div class="table-wrap"><table><thead><tr><th>月</th>${items.map(i=>`<th style="text-align:center">${i.icon}${i.name}</th>`).join('')}</tr></thead><tbody>`;
+  months.forEach(ym => {
+    html += `<tr><td style="white-space:nowrap;font-weight:700">${ym}</td>`;
+    items.forEach(item => {
+      const found = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
+      if (found.length) {
+        const total = found.reduce((s,r)=>s+toNum(r.adjusted),0);
+        html += `<td class="amount-cell" style="color:var(--accent)">${fmt(total)}</td>`;
+      } else {
+        html += `<td style="text-align:center"><button class="btn btn-secondary btn-sm" onclick="quickAddForMonth('${item.category}','${ym}')" title="${item.name}を${ym}分として入力">＋</button></td>`;
+      }
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+function quickAddForMonth(category, ym) {
+  const date = ym + '-28';
+  const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
+  if (按分Cats.includes(category)) {
+    const item = monthly按分Items.find(i=>i.category===category);
+    showSection('按分', document.querySelectorAll('.main-tab')[5]);
+    if (item) {
+      const dateInput = document.getElementById(`m-${item.key}-date`);
+      if (dateInput) dateInput.value = date;
+      const amountInput = document.getElementById(`m-${item.key}-amount`);
+      if (amountInput) amountInput.focus();
+    }
+  } else {
+    showSection('add', document.querySelectorAll('.main-tab')[1]);
+    document.getElementById('i-date').value = date;
+    document.getElementById('i-cat').value = category;
+    onCatChange();
+    document.getElementById('i-amount').focus();
   }
   window.scrollTo(0,0);
 }
