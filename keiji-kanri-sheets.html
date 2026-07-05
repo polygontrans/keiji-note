@@ -361,8 +361,67 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
 <!-- INCOME -->
 <div id="section-income" class="section">
   <div class="alert ai">💰 <div><strong>収入・補助金・給付金</strong>は経費ではなく「売上・収入」として記録します。補助金・給付金は原則として課税対象の収入です。</div></div>
+
+  <!-- 外貨売上（USD汎用） パネル -->
+  <div class="card" style="border:2px solid #f59e0b;background:#fffbeb">
+    <div class="card-title" style="color:#92400e">💱 外貨売上（USD → JPY 自動換算）</div>
+    <div class="alert" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#78350f">
+      📋 <strong>税務ルール</strong>：売上日のTTM（仲値）で円換算するのが国税庁の原則です。GoogleFinanceの終値レート（TTM近似値）を自動取得して記録します。Etsy・翻訳・その他海外取引すべてに対応。一度決めたら年間同じ方法を継続してください。
+    </div>
+    <input type="hidden" id="edit-fx-id">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>売上日 <span class="req">*</span></label>
+        <input type="date" id="etsy-date" onchange="fetchUSDRate()">
+        <div class="hint">入力すると自動でレートを取得します</div>
+      </div>
+      <div class="form-group">
+        <label>仕事の種類 <span class="req">*</span></label>
+        <select id="etsy-source">
+          <option value="Etsy売上">🛍 Etsy（スタンプ・デジタル販売）</option>
+          <option value="翻訳売上">📝 翻訳・ライティング</option>
+          <option value="CG制作売上">🎨 CG・デザイン制作</option>
+          <option value="海外フリーランス">💼 海外フリーランス（その他）</option>
+          <option value="外貨売上">💱 その他外貨売上</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>USD金額 <span class="req">*</span></label>
+        <input type="number" id="etsy-usd" placeholder="例：25.50" min="0" step="0.01" oninput="calcEtsyJPY()">
+        <div class="hint">受取金額（ドル）</div>
+      </div>
+      <div class="form-group">
+        <label>TTMレート（円/USD）</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="etsy-rate" placeholder="自動取得中..." step="0.01" oninput="calcEtsyJPY()" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="fetchUSDRate()" title="レートを再取得">🔄</button>
+        </div>
+        <div class="hint" id="etsy-rate-hint" style="color:var(--text3)">売上日を入力するとGoogleFinanceから自動取得</div>
+      </div>
+      <div class="form-group">
+        <label>円換算額（自動計算）</label>
+        <input type="number" id="etsy-jpy" placeholder="自動計算されます" readonly style="background:#f0fdf4;font-weight:700;color:var(--accent)">
+        <div class="hint">USD × TTMレート（1円未満切り捨て）</div>
+      </div>
+      <div class="form-group full">
+        <label>内容・摘要 <span class="req">*</span></label>
+        <input type="text" id="etsy-memo" placeholder="例：スタンプ販売3点 / 翻訳業務（〇〇社）">
+      </div>
+      <div class="form-group full"><label>メモ（任意）</label><textarea id="etsy-note" placeholder="注文番号・クライアント名・Payonner受取日など（確定申告の際に役立ちます）"></textarea></div>
+    </div>
+    <div id="etsy-preview" style="display:none;margin:10px 0;padding:12px 14px;background:#d1fae5;border-radius:8px;font-size:13px;border:1px solid #6ee7b7">
+      <strong id="etsy-preview-text"></strong>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="etsy-save-btn" onclick="saveEtsyIncome()" style="background:#f59e0b;color:#fff;font-weight:700">💾 外貨売上として保存</button>
+      <button class="btn btn-secondary" onclick="clearEtsyForm()">🔄 クリア</button>
+      <button class="btn btn-secondary btn-sm" id="cancel-fx-edit-btn" style="display:none" onclick="cancelFxEdit()">✕ キャンセル</button>
+    </div>
+  </div>
+
+  <!-- 通常の収入入力 -->
   <div class="card">
-    <div class="card-title" id="inc-form-title">💰 収入・補助金を入力する</div>
+    <div class="card-title" id="inc-form-title">💰 収入・補助金を入力する（円建て）</div>
     <input type="hidden" id="edit-income-id">
     <div class="form-grid">
       <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="inc-date"></div>
@@ -395,7 +454,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>日付</th><th>種類</th><th>内容</th><th style="text-align:right">金額</th><th>操作</th></tr></thead>
+        <thead><tr><th>日付</th><th>種類</th><th>内容</th><th style="text-align:right">金額（円）</th><th style="text-align:right">USD</th><th>操作</th></tr></thead>
         <tbody id="inc-body"></tbody>
       </table>
     </div>
@@ -749,9 +808,9 @@ function startApp() {
   renderMonthly按分Rows();
   renderGuide();
   loadData();
-  // デフォルト日付を今日に設定
+  // デフォルト日付を今日に設定（外貨売上フォームも含む）
   const today = new Date().toISOString().split('T')[0];
-  ['i-date','inc-date','k-date','dep-date'].forEach(id => {
+  ['i-date','inc-date','k-date','dep-date','etsy-date'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = today;
   });
@@ -1369,6 +1428,142 @@ async function moveKaigyohiToExpense(id) {
   finally { hideLoading(); }
 }
 
+// ══ 外貨売上（USD汎用・TTMレート自動換算） ══
+async function fetchUSDRate() {
+  const dateVal = document.getElementById('etsy-date').value;
+  if (!dateVal) return;
+  const hint = document.getElementById('etsy-rate-hint');
+  const rateInput = document.getElementById('etsy-rate');
+  hint.textContent = '⏳ レートを取得中…';
+  hint.style.color = 'var(--text3)';
+  try {
+    const result = await gasRequest({action:'getUSDRate', date: dateVal});
+    if (result.ok && result.rate) {
+      rateInput.value = result.rate;
+      hint.textContent = `✅ ${dateVal} のTTMレート（GoogleFinance終値）：1USD = ${result.rate}円`;
+      hint.style.color = 'var(--accent)';
+      calcEtsyJPY();
+    } else {
+      hint.textContent = '⚠️ 自動取得できませんでした。手動でレートを入力してください（三菱UFJ等の公表値）';
+      hint.style.color = 'var(--orange)';
+    }
+  } catch(e) {
+    hint.textContent = '⚠️ 取得エラー。手動でレートを入力してください。';
+    hint.style.color = 'var(--red)';
+  }
+}
+
+function calcEtsyJPY() {
+  const usd = parseFloat(document.getElementById('etsy-usd').value) || 0;
+  const rate = parseFloat(document.getElementById('etsy-rate').value) || 0;
+  const jpy = Math.floor(usd * rate);
+  const jpyInput = document.getElementById('etsy-jpy');
+  const preview = document.getElementById('etsy-preview');
+  if (usd > 0 && rate > 0) {
+    jpyInput.value = jpy;
+    preview.style.display = 'block';
+    document.getElementById('etsy-preview-text').innerHTML =
+      `💱 $${usd.toFixed(2)} × ${rate}円 ＝ <span style="font-size:16px;font-family:'DM Mono',monospace;color:var(--accent)">${fmt(jpy)}</span>（TTMレートで円換算・確定申告用）`;
+  } else {
+    jpyInput.value = '';
+    preview.style.display = 'none';
+  }
+}
+
+async function saveEtsyIncome() {
+  const date = document.getElementById('etsy-date').value;
+  const usd = parseFloat(document.getElementById('etsy-usd').value) || 0;
+  const rate = parseFloat(document.getElementById('etsy-rate').value) || 0;
+  const jpy = Math.floor(usd * rate);
+  const source = document.getElementById('etsy-source').value;
+  const memo = document.getElementById('etsy-memo').value.trim();
+  const noteExtra = document.getElementById('etsy-note').value.trim();
+  const editId = document.getElementById('edit-fx-id').value;
+
+  if (!date || !usd || !rate || !memo) {
+    alert('売上日・USD金額・TTMレート・内容は必須です。\nレートが自動取得できない場合は手動で入力してください。');
+    return;
+  }
+  // メモにUSD・レートを記録（税務調査対策）
+  const note = `USD: $${usd.toFixed(2)} × TTM: ${rate}円 = ${fmt(jpy)}（${date}時点）${noteExtra ? ' / ' + noteExtra : ''}`;
+  document.getElementById('etsy-save-btn').disabled = true;
+  showLoading('外貨売上を保存中…');
+
+  if (editId) {
+    // 編集モード
+    const record = {id: editId, date, type: source, memo, amount: jpy, note};
+    try {
+      const result = await gasRequest({action:'updateIncome', record});
+      if (result.ok) {
+        const idx = incomes.findIndex(i => String(i.id) === String(editId));
+        if (idx >= 0) incomes[idx] = record;
+        clearEtsyForm();
+        renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
+        alert(`✅ 更新しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
+      } else { alert('更新に失敗しました: ' + (result.error || '')); }
+    } catch(e) { alert('接続エラー: ' + e.message); }
+    finally { hideLoading(); document.getElementById('etsy-save-btn').disabled = false; }
+  } else {
+    // 新規保存
+    const record = {id: Date.now(), date, type: source, memo, amount: jpy, note};
+    try {
+      const result = await gasRequest({action:'addIncome', record});
+      if (result.ok) {
+        incomes.push(record);
+        clearEtsyForm();
+        renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
+        alert(`✅ 保存しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
+      } else { alert('保存に失敗しました: ' + (result.error || '')); }
+    } catch(e) { alert('接続エラー: ' + e.message); }
+    finally { hideLoading(); document.getElementById('etsy-save-btn').disabled = false; }
+  }
+}
+
+// 外貨売上の編集（リストの✏️ボタンから呼ばれる）
+function editFxIncome(id) {
+  const i = incomes.find(i => String(i.id) === String(id));
+  if (!i) return;
+  // フォームに値を復元
+  document.getElementById('edit-fx-id').value = i.id;
+  document.getElementById('etsy-date').value = i.date;
+  document.getElementById('etsy-memo').value = i.memo;
+  document.getElementById('etsy-source').value = i.type;
+  // メモからUSD・レートを復元（"USD: $25.50 × TTM: 152.34円 = ..." の形式）
+  const match = i.note && i.note.match(/USD: \$([0-9.]+) × TTM: ([0-9.]+)円/);
+  if (match) {
+    document.getElementById('etsy-usd').value = match[1];
+    document.getElementById('etsy-rate').value = match[2];
+    document.getElementById('etsy-jpy').value = i.amount;
+    const noteClean = i.note.replace(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?/, '').trim();
+    document.getElementById('etsy-note').value = noteClean;
+    calcEtsyJPY();
+  } else {
+    // メモ形式が違う場合は円換算額だけ入れる
+    document.getElementById('etsy-jpy').value = i.amount;
+    document.getElementById('etsy-note').value = i.note || '';
+  }
+  document.getElementById('etsy-save-btn').textContent = '💾 外貨売上を更新';
+  document.getElementById('cancel-fx-edit-btn').style.display = 'inline-flex';
+  // 収入タブの外貨パネルまでスクロール
+  showSection('income', document.querySelectorAll('.main-tab')[2]);
+  window.scrollTo(0, 0);
+}
+
+function cancelFxEdit() { clearEtsyForm(); }
+
+function clearEtsyForm() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('edit-fx-id').value = '';
+  document.getElementById('etsy-date').value = today;
+  ['etsy-usd','etsy-rate','etsy-jpy','etsy-memo','etsy-note'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('etsy-source').value = 'Etsy売上';
+  document.getElementById('etsy-rate-hint').textContent = '売上日を入力するとGoogleFinanceから自動取得';
+  document.getElementById('etsy-rate-hint').style.color = 'var(--text3)';
+  document.getElementById('etsy-preview').style.display = 'none';
+  document.getElementById('etsy-save-btn').textContent = '💾 外貨売上として保存';
+  document.getElementById('cancel-fx-edit-btn').style.display = 'none';
+}
+
 // ══ 収入 ══
 async function saveIncome() {
   const date = document.getElementById('inc-date').value;
@@ -1625,17 +1820,25 @@ function renderIncomes() {
   document.getElementById('inc-total-disp').textContent='合計 '+fmt(total);
   if (!sorted.length){tbody.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
-  const tb={'売上':'bg','補助金':'bb','給付金':'bo','助成金':'bpu','家賃収入':'bg','その他収入':'bgr'};
-  tbody.innerHTML=sorted.map(i=>`<tr>
-    <td>${i.date}</td>
-    <td><span class="badge ${tb[i.type]||'bgr'}">${i.type}</span></td>
-    <td>${i.memo}</td>
-    <td class="amount-cell">${fmt(toNum(i.amount))}</td>
-    <td style="white-space:nowrap">
-      <button class="btn btn-warning btn-sm" onclick="editIncome('${i.id}')" style="margin-right:4px">✏️</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteIncome('${i.id}')">🗑</button>
-    </td>
-  </tr>`).join('');
+  const tb={'売上':'bg','補助金':'bb','給付金':'bo','助成金':'bpu','家賃収入':'bg','その他収入':'bgr',
+    'Etsy売上':'bb','翻訳売上':'bb','CG制作売上':'bb','海外フリーランス':'bb','外貨売上':'bb','Etsy売上(USD)':'bb'};
+  const fxTypes=['Etsy売上','翻訳売上','CG制作売上','海外フリーランス','外貨売上','Etsy売上(USD)'];
+  tbody.innerHTML=sorted.map(i=>{
+    const isFx=fxTypes.includes(i.type);
+    const usdMatch=i.note&&i.note.match(/USD: \$([0-9.]+)/);
+    const usdDisp=usdMatch?`<span style="font-size:11px;color:#92400e;font-family:'DM Mono',monospace">$${usdMatch[1]}</span>`:'';
+    const editBtn=isFx
+      ?`<button class="btn btn-warning btn-sm" onclick="editFxIncome('${i.id}')" style="margin-right:4px" title="外貨売上を編集">✏️</button>`
+      :`<button class="btn btn-warning btn-sm" onclick="editIncome('${i.id}')" style="margin-right:4px">✏️</button>`;
+    return `<tr>
+      <td>${i.date}</td>
+      <td><span class="badge ${tb[i.type]||'bgr'}">${i.type}</span></td>
+      <td>${i.memo}</td>
+      <td class="amount-cell">${fmt(toNum(i.amount))}</td>
+      <td class="amount-cell">${usdDisp}</td>
+      <td style="white-space:nowrap">${editBtn}<button class="btn btn-danger btn-sm" onclick="deleteIncome('${i.id}')">🗑</button></td>
+    </tr>`;
+  }).join('');
 }
 
 function renderDeprec() {
