@@ -270,8 +270,68 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
 
 <!-- ADD RECORD -->
 <div id="section-add" class="section">
+  <!-- 外貨経費（USD汎用・TTMレート自動換算） -->
+  <div class="card" style="border:2px solid #f59e0b;background:#fffbeb">
+    <div class="card-title" style="color:#92400e">💱 外貨経費（USD → JPY 自動換算）</div>
+    <div class="alert" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#78350f">
+      📋 <strong>税務ルール</strong>：クレジットカードの請求額ではなく、<strong>実際に購入・利用した日（取引日）</strong>のTTM（仲値）で円換算するのが原則です。カードの引き落とし日ではありません。Etsy手数料・海外ツール代・その他外貨経費に対応。
+    </div>
+    <input type="hidden" id="edit-fxexp-id">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>取引日（購入・利用日） <span class="req">*</span></label>
+        <input type="date" id="fxexp-date" onchange="fetchUSDRateExp()">
+        <div class="hint">カードの引き落とし日ではなく、実際に購入・利用した日</div>
+      </div>
+      <div class="form-group">
+        <label>勘定科目 <span class="req">*</span></label>
+        <select id="fxexp-cat">
+          <option value="支払手数料">💳 支払手数料（Etsy手数料等）</option>
+          <option value="通信費_AI">🤖 AIサービス・海外サブスク</option>
+          <option value="諸会費">📋 諸会費（ショップ出店料等）</option>
+          <option value="広告宣伝費">📣 広告宣伝費</option>
+          <option value="仕入高">📦 仕入（商品・材料）</option>
+          <option value="消耗品費">✏️ 消耗品費</option>
+          <option value="研修費">📚 研修費・海外セミナー</option>
+          <option value="雑費">📎 雑費</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>USD金額 <span class="req">*</span></label>
+        <input type="number" id="fxexp-usd" placeholder="例：19.00" min="0" step="0.01" oninput="calcFxExpJPY()">
+        <div class="hint">支払ったドル金額</div>
+      </div>
+      <div class="form-group">
+        <label>TTMレート（円/USD）</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="fxexp-rate" placeholder="自動取得中..." step="0.01" oninput="calcFxExpJPY()" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="fetchUSDRateExp()" title="レートを再取得">🔄</button>
+        </div>
+        <div class="hint" id="fxexp-rate-hint" style="color:var(--text3)">取引日を入力するとGoogleFinanceから自動取得</div>
+      </div>
+      <div class="form-group">
+        <label>円換算額（自動計算）</label>
+        <input type="number" id="fxexp-jpy" placeholder="自動計算されます" readonly style="background:#f0fdf4;font-weight:700;color:var(--accent)">
+        <div class="hint">USD × TTMレート（1円未満切り捨て）</div>
+      </div>
+      <div class="form-group full">
+        <label>内容・摘要 <span class="req">*</span></label>
+        <input type="text" id="fxexp-memo" placeholder="例：Etsyショップ設立手数料 / 商品分析リサーチ用購入">
+      </div>
+      <div class="form-group full"><label>メモ（任意）</label><textarea id="fxexp-note" placeholder="注文番号・カード名など（確定申告の際に役立ちます）"></textarea></div>
+    </div>
+    <div id="fxexp-preview" style="display:none;margin:10px 0;padding:12px 14px;background:#d1fae5;border-radius:8px;font-size:13px;border:1px solid #6ee7b7">
+      <strong id="fxexp-preview-text"></strong>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="fxexp-save-btn" onclick="saveFxExpense()" style="background:#f59e0b;color:#fff;font-weight:700">💾 外貨経費として保存</button>
+      <button class="btn btn-secondary" onclick="clearFxExpForm()">🔄 クリア</button>
+      <button class="btn btn-secondary btn-sm" id="cancel-fxexp-edit-btn" style="display:none" onclick="cancelFxExpEdit()">✕ キャンセル</button>
+    </div>
+  </div>
+
   <div class="card">
-    <div class="card-title" id="add-form-title">✏️ 経費を入力する</div>
+    <div class="card-title" id="add-form-title">✏️ 経費を入力する（円建て）</div>
     <div class="alert aw">📌 <div>レシート・領収書は必ず保管！青色申告は<strong>7年間</strong>の保存義務があります。</div></div>
     <input type="hidden" id="edit-record-id">
     <div class="form-grid">
@@ -810,7 +870,7 @@ function startApp() {
   loadData();
   // デフォルト日付を今日に設定（外貨売上フォームも含む）
   const today = new Date().toISOString().split('T')[0];
-  ['i-date','inc-date','k-date','dep-date','etsy-date'].forEach(id => {
+  ['i-date','inc-date','k-date','dep-date','etsy-date','fxexp-date'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = today;
   });
@@ -1202,6 +1262,135 @@ function updateAmountPreview() {
     preview.style.display = 'block';
     document.getElementById('amount-preview-val').textContent = fmt(adj)+(ratio<100?` （${ratio}%按分）`:'');
   } else { preview.style.display = 'none'; }
+}
+
+// ══ 外貨経費（USD汎用・TTMレート自動換算） ══
+async function fetchUSDRateExp() {
+  const dateVal = document.getElementById('fxexp-date').value;
+  if (!dateVal) return;
+  const hint = document.getElementById('fxexp-rate-hint');
+  const rateInput = document.getElementById('fxexp-rate');
+  hint.textContent = '⏳ レートを取得中…';
+  hint.style.color = 'var(--text3)';
+  try {
+    const result = await gasRequest({action:'getUSDRate', date: dateVal});
+    if (result.ok && result.rate) {
+      rateInput.value = result.rate;
+      hint.textContent = `✅ ${dateVal} のTTMレート（GoogleFinance終値）：1USD = ${result.rate}円`;
+      hint.style.color = 'var(--accent)';
+      calcFxExpJPY();
+    } else {
+      hint.textContent = '⚠️ 自動取得できませんでした。手動でレートを入力してください（三菱UFJ等の公表値）';
+      hint.style.color = 'var(--orange)';
+    }
+  } catch(e) {
+    hint.textContent = '⚠️ 取得エラー。手動でレートを入力してください。';
+    hint.style.color = 'var(--red)';
+  }
+}
+
+function calcFxExpJPY() {
+  const usd = parseFloat(document.getElementById('fxexp-usd').value) || 0;
+  const rate = parseFloat(document.getElementById('fxexp-rate').value) || 0;
+  const jpy = Math.floor(usd * rate);
+  const jpyInput = document.getElementById('fxexp-jpy');
+  const preview = document.getElementById('fxexp-preview');
+  if (usd > 0 && rate > 0) {
+    jpyInput.value = jpy;
+    preview.style.display = 'block';
+    document.getElementById('fxexp-preview-text').innerHTML =
+      `💱 $${usd.toFixed(2)} × ${rate}円 ＝ <span style="font-size:16px;font-family:'DM Mono',monospace;color:var(--accent)">${fmt(jpy)}</span>（取引日のTTMレートで円換算・確定申告用）`;
+  } else {
+    jpyInput.value = '';
+    preview.style.display = 'none';
+  }
+}
+
+async function saveFxExpense() {
+  const date = document.getElementById('fxexp-date').value;
+  const usd = parseFloat(document.getElementById('fxexp-usd').value) || 0;
+  const rate = parseFloat(document.getElementById('fxexp-rate').value) || 0;
+  const jpy = Math.floor(usd * rate);
+  const category = document.getElementById('fxexp-cat').value;
+  const memo = document.getElementById('fxexp-memo').value.trim();
+  const noteExtra = document.getElementById('fxexp-note').value.trim();
+  const editId = document.getElementById('edit-fxexp-id').value;
+
+  if (!date || !usd || !rate || !memo) {
+    alert('取引日・USD金額・TTMレート・内容は必須です。\nレートが自動取得できない場合は手動で入力してください。');
+    return;
+  }
+  const note = `USD: $${usd.toFixed(2)} × TTM: ${rate}円 = ${fmt(jpy)}（${date}時点・取引日換算）${noteExtra ? ' / ' + noteExtra : ''}`;
+  document.getElementById('fxexp-save-btn').disabled = true;
+  showLoading('外貨経費を保存中…');
+
+  if (editId) {
+    const record = {id: editId, date, category, memo, payment:'クレジットカード', amount: jpy, ratio:100, adjusted: jpy, note};
+    try {
+      const result = await gasRequest({action:'updateRecord', record});
+      if (result.ok) {
+        const idx = records.findIndex(r => String(r.id) === String(editId));
+        if (idx >= 0) records[idx] = record;
+        clearFxExpForm();
+        renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
+        alert(`✅ 更新しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
+      } else { alert('更新に失敗しました: ' + (result.error || '')); }
+    } catch(e) { alert('接続エラー: ' + e.message); }
+    finally { hideLoading(); document.getElementById('fxexp-save-btn').disabled = false; }
+  } else {
+    const record = {id: Date.now(), date, category, memo, payment:'クレジットカード', amount: jpy, ratio:100, adjusted: jpy, note};
+    try {
+      const result = await gasRequest({action:'addRecord', record});
+      if (result.ok) {
+        records.push(record);
+        clearFxExpForm();
+        renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
+        alert(`✅ 保存しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
+      } else { alert('保存に失敗しました: ' + (result.error || '')); }
+    } catch(e) { alert('接続エラー: ' + e.message); }
+    finally { hideLoading(); document.getElementById('fxexp-save-btn').disabled = false; }
+  }
+}
+
+// 一覧の✏️から外貨経費を編集する際に呼ばれる
+function editFxExpense(id) {
+  const r = records.find(r => String(r.id) === String(id));
+  if (!r) return;
+  document.getElementById('edit-fxexp-id').value = r.id;
+  document.getElementById('fxexp-date').value = r.date;
+  document.getElementById('fxexp-cat').value = r.category;
+  document.getElementById('fxexp-memo').value = r.memo;
+  const match = r.note && r.note.match(/USD: \$([0-9.]+) × TTM: ([0-9.]+)円/);
+  if (match) {
+    document.getElementById('fxexp-usd').value = match[1];
+    document.getElementById('fxexp-rate').value = match[2];
+    document.getElementById('fxexp-jpy').value = r.amount;
+    const noteClean = r.note.replace(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?/, '').trim();
+    document.getElementById('fxexp-note').value = noteClean;
+    calcFxExpJPY();
+  } else {
+    document.getElementById('fxexp-jpy').value = r.amount;
+    document.getElementById('fxexp-note').value = r.note || '';
+  }
+  document.getElementById('fxexp-save-btn').textContent = '💾 外貨経費を更新';
+  document.getElementById('cancel-fxexp-edit-btn').style.display = 'inline-flex';
+  showSection('add', document.querySelectorAll('.main-tab')[1]);
+  window.scrollTo(0, 0);
+}
+
+function cancelFxExpEdit() { clearFxExpForm(); }
+
+function clearFxExpForm() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('edit-fxexp-id').value = '';
+  document.getElementById('fxexp-date').value = today;
+  ['fxexp-usd','fxexp-rate','fxexp-jpy','fxexp-memo','fxexp-note'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('fxexp-cat').value = '支払手数料';
+  document.getElementById('fxexp-rate-hint').textContent = '取引日を入力するとGoogleFinanceから自動取得';
+  document.getElementById('fxexp-rate-hint').style.color = 'var(--text3)';
+  document.getElementById('fxexp-preview').style.display = 'none';
+  document.getElementById('fxexp-save-btn').textContent = '💾 外貨経費として保存';
+  document.getElementById('cancel-fxexp-edit-btn').style.display = 'none';
 }
 
 async function saveRecord() {
@@ -1777,18 +1966,25 @@ function renderList() {
   if (!f.length){tbody.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   const pb={'現金':'bgr','クレジットカード':'bb','銀行振込':'bg','電子マネー':'bo','口座引落':'bpu'};
-  tbody.innerHTML=f.map(r=>`<tr>
-    <td style="white-space:nowrap">${r.date}</td>
-    <td><span class="badge bg">${catDisplay(r.category)}</span></td>
-    <td>${r.memo}</td>
-    <td><span class="badge ${pb[r.payment]||'bgr'}">${r.payment}</span></td>
-    <td class="amount-cell">${fmt(toNum(r.adjusted))}${toNum(r.ratio)<100?`<br><span style="font-size:10px;color:var(--text3)">(${r.ratio}%)</span>`:''}</td>
-    <td style="white-space:nowrap">
-      <button class="btn btn-warning btn-sm" onclick="editRecord('${r.id}')" style="margin:1px">✏️</button>
-      <button class="btn btn-purple btn-sm" onclick="moveExpenseToKaigyohi('${r.id}')" style="margin:1px" title="開業費へ戻す">🌱開業費へ</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')" style="margin:1px">🗑</button>
-    </td>
-  </tr>`).join('');
+  tbody.innerHTML=f.map(r=>{
+    const usdMatch = r.note && r.note.match(/USD: \$([0-9.]+)/);
+    const usdDisp = usdMatch ? `<br><span style="font-size:10px;color:#92400e;font-family:'DM Mono',monospace">$${usdMatch[1]}</span>` : '';
+    const editBtn = usdMatch
+      ? `<button class="btn btn-warning btn-sm" onclick="editFxExpense('${r.id}')" style="margin:1px" title="外貨経費を編集">✏️</button>`
+      : `<button class="btn btn-warning btn-sm" onclick="editRecord('${r.id}')" style="margin:1px">✏️</button>`;
+    return `<tr>
+      <td style="white-space:nowrap">${r.date}</td>
+      <td><span class="badge bg">${catDisplay(r.category)}</span></td>
+      <td>${r.memo}</td>
+      <td><span class="badge ${pb[r.payment]||'bgr'}">${r.payment}</span></td>
+      <td class="amount-cell">${fmt(toNum(r.adjusted))}${toNum(r.ratio)<100?`<br><span style="font-size:10px;color:var(--text3)">(${r.ratio}%)</span>`:''}${usdDisp}</td>
+      <td style="white-space:nowrap">
+        ${editBtn}
+        <button class="btn btn-purple btn-sm" onclick="moveExpenseToKaigyohi('${r.id}')" style="margin:1px" title="開業費へ戻す">🌱開業費へ</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')" style="margin:1px">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
 }
 
 function renderKaigyohi() {
