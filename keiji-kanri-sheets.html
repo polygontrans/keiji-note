@@ -302,6 +302,17 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
         <div class="hint">支払ったドル金額</div>
       </div>
       <div class="form-group">
+        <label>支払方法</label>
+        <select id="fxexp-pay">
+          <option value="クレジットカード" selected>クレジットカード</option>
+          <option value="Payoneer">Payoneer（ペイオニア）</option>
+          <option value="Wise">Wise（ワイズ）</option>
+          <option value="PayPal">PayPal</option>
+          <option value="銀行振込">銀行振込</option>
+          <option value="現金">現金</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label>TTMレート（円/USD）</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="number" id="fxexp-rate" placeholder="自動取得中..." step="0.01" oninput="calcFxExpJPY()" style="flex:1">
@@ -449,6 +460,17 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
         <label>USD金額 <span class="req">*</span></label>
         <input type="number" id="etsy-usd" placeholder="例：25.50" min="0" step="0.01" oninput="calcEtsyJPY()">
         <div class="hint">受取金額（ドル）</div>
+      </div>
+      <div class="form-group">
+        <label>受取方法</label>
+        <select id="etsy-pay">
+          <option value="Payoneer">Payoneer（ペイオニア）</option>
+          <option value="Wise">Wise（ワイズ）</option>
+          <option value="PayPal">PayPal</option>
+          <option value="銀行振込">銀行振込（直接入金）</option>
+          <option value="Etsy Payments">Etsy Payments（Etsy残高）</option>
+          <option value="その他">その他</option>
+        </select>
       </div>
       <div class="form-group">
         <label>TTMレート（円/USD）</label>
@@ -1312,6 +1334,7 @@ async function saveFxExpense() {
   const rate = parseFloat(document.getElementById('fxexp-rate').value) || 0;
   const jpy = Math.floor(usd * rate);
   const category = document.getElementById('fxexp-cat').value;
+  const payment = document.getElementById('fxexp-pay').value;
   const memo = document.getElementById('fxexp-memo').value.trim();
   const noteExtra = document.getElementById('fxexp-note').value.trim();
   const editId = document.getElementById('edit-fxexp-id').value;
@@ -1325,7 +1348,7 @@ async function saveFxExpense() {
   showLoading('外貨経費を保存中…');
 
   if (editId) {
-    const record = {id: editId, date, category, memo, payment:'クレジットカード', amount: jpy, ratio:100, adjusted: jpy, note};
+    const record = {id: editId, date, category, memo, payment, amount: jpy, ratio:100, adjusted: jpy, note};
     try {
       const result = await gasRequest({action:'updateRecord', record});
       if (result.ok) {
@@ -1338,7 +1361,7 @@ async function saveFxExpense() {
     } catch(e) { alert('接続エラー: ' + e.message); }
     finally { hideLoading(); document.getElementById('fxexp-save-btn').disabled = false; }
   } else {
-    const record = {id: Date.now(), date, category, memo, payment:'クレジットカード', amount: jpy, ratio:100, adjusted: jpy, note};
+    const record = {id: Date.now(), date, category, memo, payment, amount: jpy, ratio:100, adjusted: jpy, note};
     try {
       const result = await gasRequest({action:'addRecord', record});
       if (result.ok) {
@@ -1359,6 +1382,7 @@ function editFxExpense(id) {
   document.getElementById('edit-fxexp-id').value = r.id;
   document.getElementById('fxexp-date').value = r.date;
   document.getElementById('fxexp-cat').value = r.category;
+  document.getElementById('fxexp-pay').value = r.payment || 'クレジットカード';
   document.getElementById('fxexp-memo').value = r.memo;
   const match = r.note && r.note.match(/USD: \$([0-9.]+) × TTM: ([0-9.]+)円/);
   if (match) {
@@ -1386,6 +1410,7 @@ function clearFxExpForm() {
   document.getElementById('fxexp-date').value = today;
   ['fxexp-usd','fxexp-rate','fxexp-jpy','fxexp-memo','fxexp-note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('fxexp-cat').value = '支払手数料';
+  document.getElementById('fxexp-pay').value = 'クレジットカード';
   document.getElementById('fxexp-rate-hint').textContent = '取引日を入力するとGoogleFinanceから自動取得';
   document.getElementById('fxexp-rate-hint').style.color = 'var(--text3)';
   document.getElementById('fxexp-preview').style.display = 'none';
@@ -1510,11 +1535,12 @@ async function moveExpenseToKaigyohi(id) {
         const idx = kaigyohi.findIndex(k=>String(k.id)===String(result.kaigyohiId));
         if (idx>=0) kaigyohi[idx].moved = false;
       } else {
-        // 新規に開業費として登録（USD情報があれば保持する）
+        // 新規に開業費として登録（USD情報・支払方法があれば保持する）
         const origNote = r.note || '';
         const usdMatch = origNote.match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
         const usdPart = usdMatch ? usdMatch[0] : '';
-        const newNote = usdPart ? (usdPart + ' / 経費より移動: ' + r.category) : ('経費より移動: ' + r.category);
+        const payTag = `[PAY:${r.payment||'クレジットカード'}]`;
+        const newNote = payTag + (usdPart ? (' ' + usdPart) : '') + ' / 経費より移動: ' + r.category;
         kaigyohi.push({id:String(result.newKaigyohiId), date:r.date, category:'その他開業費', memo:r.memo, amount:r.amount, note:newNote, moved:false});
       }
       renderList(); renderKaigyohi(); renderDashboard(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
@@ -1609,12 +1635,15 @@ async function moveKaigyohiToExpense(id) {
   try {
     const result = await gasRequest({action:'moveToRecord', id});
     if (result.ok) {
-      // 経費リストにも反映（USD情報があれば保持する）
+      // 経費リストにも反映（USD情報・支払方法があれば復元する）
       const origNote = k.note || '';
       const usdMatch = origNote.match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
       const usdPart = usdMatch ? usdMatch[0] : '';
-      const newNote = usdPart ? (usdPart + ' / 開業費より移動: ' + k.category) : ('開業費より移動: ' + k.category);
-      const newRec = {id:String(result.newId), date:k.date, category:'開業費→経費', memo:k.memo, payment:'現金', amount:k.amount, ratio:100, adjusted:k.amount, note:newNote};
+      const payMatch = origNote.match(/\[PAY:([^\]]+)\]/);
+      const payment = payMatch ? payMatch[1] : 'クレジットカード';
+      const cleanNote = origNote.replace(/\[PAY:[^\]]+\]\s*/, '').trim();
+      const newNote = (usdPart ? usdPart : cleanNote) + ' / 開業費より移動: ' + k.category;
+      const newRec = {id:String(result.newId), date:k.date, category:'開業費→経費', memo:k.memo, payment, amount:k.amount, ratio:100, adjusted:k.amount, note:newNote};
       records.push(newRec);
       const idx=kaigyohi.findIndex(ki=>String(ki.id)===String(id));
       if(idx>=0) kaigyohi[idx].moved=true;
@@ -1673,6 +1702,7 @@ async function saveEtsyIncome() {
   const rate = parseFloat(document.getElementById('etsy-rate').value) || 0;
   const jpy = Math.floor(usd * rate);
   const source = document.getElementById('etsy-source').value;
+  const payMethod = document.getElementById('etsy-pay').value;
   const memo = document.getElementById('etsy-memo').value.trim();
   const noteExtra = document.getElementById('etsy-note').value.trim();
   const editId = document.getElementById('edit-fx-id').value;
@@ -1681,8 +1711,8 @@ async function saveEtsyIncome() {
     alert('売上日・USD金額・TTMレート・内容は必須です。\nレートが自動取得できない場合は手動で入力してください。');
     return;
   }
-  // メモにUSD・レートを記録（税務調査対策）
-  const note = `USD: $${usd.toFixed(2)} × TTM: ${rate}円 = ${fmt(jpy)}（${date}時点）${noteExtra ? ' / ' + noteExtra : ''}`;
+  // メモにUSD・レート・受取方法を記録（税務調査対策）
+  const note = `USD: $${usd.toFixed(2)} × TTM: ${rate}円 = ${fmt(jpy)}（${date}時点）/ 受取方法: ${payMethod}${noteExtra ? ' / ' + noteExtra : ''}`;
   document.getElementById('etsy-save-btn').disabled = true;
   showLoading('外貨売上を保存中…');
 
@@ -1725,13 +1755,16 @@ function editFxIncome(id) {
   document.getElementById('etsy-date').value = i.date;
   document.getElementById('etsy-memo').value = i.memo;
   document.getElementById('etsy-source').value = i.type;
+  // メモから受取方法を復元
+  const payMatch = i.note && i.note.match(/受取方法: ([^\s\/]+)/);
+  document.getElementById('etsy-pay').value = payMatch ? payMatch[1] : 'Payoneer';
   // メモからUSD・レートを復元（"USD: $25.50 × TTM: 152.34円 = ..." の形式）
   const match = i.note && i.note.match(/USD: \$([0-9.]+) × TTM: ([0-9.]+)円/);
   if (match) {
     document.getElementById('etsy-usd').value = match[1];
     document.getElementById('etsy-rate').value = match[2];
     document.getElementById('etsy-jpy').value = i.amount;
-    const noteClean = i.note.replace(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?/, '').trim();
+    const noteClean = i.note.replace(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?\s*(受取方法: [^\s\/]+)?\s*\/?/, '').trim();
     document.getElementById('etsy-note').value = noteClean;
     calcEtsyJPY();
   } else {
@@ -1754,6 +1787,7 @@ function clearEtsyForm() {
   document.getElementById('etsy-date').value = today;
   ['etsy-usd','etsy-rate','etsy-jpy','etsy-memo','etsy-note'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('etsy-source').value = 'Etsy売上';
+  document.getElementById('etsy-pay').value = 'Payoneer';
   document.getElementById('etsy-rate-hint').textContent = '売上日を入力するとGoogleFinanceから自動取得';
   document.getElementById('etsy-rate-hint').style.color = 'var(--text3)';
   document.getElementById('etsy-preview').style.display = 'none';
