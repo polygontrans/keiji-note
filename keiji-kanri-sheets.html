@@ -1510,8 +1510,12 @@ async function moveExpenseToKaigyohi(id) {
         const idx = kaigyohi.findIndex(k=>String(k.id)===String(result.kaigyohiId));
         if (idx>=0) kaigyohi[idx].moved = false;
       } else {
-        // 新規に開業費として登録
-        kaigyohi.push({id:String(result.newKaigyohiId), date:r.date, category:'その他開業費', memo:r.memo, amount:r.amount, note:'経費より移動: '+r.category, moved:false});
+        // 新規に開業費として登録（USD情報があれば保持する）
+        const origNote = r.note || '';
+        const usdMatch = origNote.match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
+        const usdPart = usdMatch ? usdMatch[0] : '';
+        const newNote = usdPart ? (usdPart + ' / 経費より移動: ' + r.category) : ('経費より移動: ' + r.category);
+        kaigyohi.push({id:String(result.newKaigyohiId), date:r.date, category:'その他開業費', memo:r.memo, amount:r.amount, note:newNote, moved:false});
       }
       renderList(); renderKaigyohi(); renderDashboard(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
       alert('✅ 開業費に戻しました！');
@@ -1605,8 +1609,12 @@ async function moveKaigyohiToExpense(id) {
   try {
     const result = await gasRequest({action:'moveToRecord', id});
     if (result.ok) {
-      // 経費リストにも反映
-      const newRec = {id:String(result.newId), date:k.date, category:'開業費→経費', memo:k.memo, payment:'現金', amount:k.amount, ratio:100, adjusted:k.amount, note:'開業費より移動: '+k.category};
+      // 経費リストにも反映（USD情報があれば保持する）
+      const origNote = k.note || '';
+      const usdMatch = origNote.match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
+      const usdPart = usdMatch ? usdMatch[0] : '';
+      const newNote = usdPart ? (usdPart + ' / 開業費より移動: ' + k.category) : ('開業費より移動: ' + k.category);
+      const newRec = {id:String(result.newId), date:k.date, category:'開業費→経費', memo:k.memo, payment:'現金', amount:k.amount, ratio:100, adjusted:k.amount, note:newNote};
       records.push(newRec);
       const idx=kaigyohi.findIndex(ki=>String(ki.id)===String(id));
       if(idx>=0) kaigyohi[idx].moved=true;
@@ -1995,17 +2003,21 @@ function renderKaigyohi() {
   document.getElementById('k-total-disp').textContent='合計 '+fmt(total);
   if (!sorted.length){tbody.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
-  tbody.innerHTML=sorted.map(k=>`<tr ${k.moved?'style="opacity:.5"':''}>
+  tbody.innerHTML=sorted.map(k=>{
+    const usdMatch = k.note && k.note.match(/USD: \$([0-9.]+)/);
+    const usdDisp = usdMatch ? `<br><span style="font-size:10px;color:#92400e;font-family:'DM Mono',monospace">$${usdMatch[1]}</span>` : '';
+    return `<tr ${k.moved?'style="opacity:.5"':''}>
     <td>${k.date}</td>
     <td><span class="badge bo">${k.category}</span></td>
     <td>${k.memo}${k.moved?'<span class="badge bg" style="margin-left:4px">経費済み</span>':''}</td>
-    <td class="amount-cell">${fmt(toNum(k.amount))}</td>
+    <td class="amount-cell">${fmt(toNum(k.amount))}${usdDisp}</td>
     <td style="white-space:nowrap;display:flex;gap:4px;flex-wrap:wrap">
       ${!k.moved?`<button class="btn btn-primary btn-sm" onclick="moveKaigyohiToExpense('${k.id}')" title="経費シートに移動">→経費</button>`:''}
       <button class="btn btn-warning btn-sm" onclick="editKaigyohi('${k.id}')">✏️</button>
       <button class="btn btn-danger btn-sm" onclick="deleteKaigyohi('${k.id}')">🗑</button>
     </td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 }
 
 function renderIncomes() {
