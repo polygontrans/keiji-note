@@ -947,7 +947,7 @@ if (typeof module !== 'undefined') module.exports = Core;
 // ════════════════════════════════════════════════════════════
 //  経費ノート 画面（基本部分：状態・通信・画面切り替え・ホーム）
 // ════════════════════════════════════════════════════════════
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.1.1';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const { fmt, num, toNum, localToday, yearOf, monthOf, normDate, pad2 } = Core;
@@ -1889,7 +1889,7 @@ const Rc = {
       if (!r.ok) throw new Error(r.error || '保存できませんでした');
       St.DB.receipts = St.DB.receipts.filter(x => x.id !== rc.id).concat([r.receipt]);
       saveCache(); renderNav();
-      if (r.ocrError) toast('⚠️ ' + r.ocrError);
+      if (r.ocrError) { toast('🧾 写真は保存しました（文字は読み取れませんでした）'); if (/許可/.test(r.ocrError)) alertBox('文字の読み取りの許可が必要です', r.ocrError); }
       else toast('🧾 写真を保存しました');
       return r;
     } catch (e) {
@@ -1911,6 +1911,18 @@ const Rc = {
       <button class="btn sec" onclick="closeModal()">あとで</button></div>`, { noFocus: true });
   },
   quickSnap() { Rc.pick('camera', 'box'); },
+  async reocr(id) {
+    busy('もう一度、文字を読み取っています…');
+    try {
+      const r = await API.call('reocrReceipt', { id }, 120000);
+      unbusy();
+      if (!r.ok) throw new Error(r.error);
+      St.DB.receipts = St.DB.receipts.map(x => x.id === id ? Object.assign({}, x, { ocrText: r.receipt.ocrText }) : x);
+      saveCache(); render();
+      toast(r.receipt.ocrText ? '🔤 読み取りました' : '⚠️ ' + (r.ocrError || '読み取れませんでした'));
+      if (!r.receipt.ocrText && r.ocrError) alertBox('読み取れませんでした', r.ocrError);
+    } catch (e) { unbusy(); alertBox('読み取れませんでした', e.message); }
+  },
   async view(id) {
     const rc = St.DB.receipts.find(x => x.id === id) || {};
     busy('写真を読み込み中…');
@@ -1967,11 +1979,11 @@ Object.assign(Entry, {
     const status = rc.status === 'uploading' ? '<span class="muted">⟳ 保存して文字を読み取っています…</span>'
       : rc.status === 'local' ? `<span class="c-orange">📴 まだ送っていません。保存すると端末に入れておき、電波のある場所で自動で送ります。</span>`
       : rc.status === 'linked' ? '<span class="c-green">📎 この取引の領収書</span>'
-      : rc.error ? `<span class="c-red">⚠️ ${esc(rc.error)}</span>` : '<span class="c-green">✅ 写真を保存しました</span>';
+      : rc.error ? `<span class="c-green">✅ 写真は保存しました</span><br><span class="c-red" style="font-size:12px">⚠️ ${esc(rc.error.length > 160 ? rc.error.slice(0, 160) + '…' : rc.error)}</span>` : '<span class="c-green">✅ 写真を保存しました</span>';
     return `<div style="display:flex;gap:12px;align-items:flex-start">
       ${rc.thumb ? `<img src="${attr(rc.thumb)}" class="rc-thumb" alt="レシート" onclick="Entry.viewRc()">` : `<div class="rc-thumb rc-ph" onclick="Entry.viewRc()">🧾</div>`}
       <div style="flex:1;min-width:0"><div style="font-size:13px">${status}</div>
-        ${p && (p.date || p.amount || p.store) ? `<div style="margin-top:6px;font-size:13px">読み取り：${parsedLine(p)}</div><button class="btn sec sm" style="margin-top:6px" onclick="Entry.applyParsed(true)">↓ 入力欄に入れ直す</button>` : (rc.ocrText === '' && rc.status === 'uploaded' ? '<div class="muted" style="margin-top:6px">文字は読み取れませんでした。手で入力してください。</div>' : '')}
+        ${p && (p.date || p.amount || p.store) ? `<div style="margin-top:6px;font-size:13px">読み取り：${parsedLine(p)}</div><button class="btn sec sm" style="margin-top:6px" onclick="Entry.applyParsed(true)">↓ 入力欄に入れ直す</button>` : ((rc.status === 'uploaded' || rc.status === 'linked') && !rc.ocrText ? `<div class="muted" style="margin-top:6px">文字は読み取れていません。手で入力するか、もう一度読み取ってください。</div><button class="btn sec sm" style="margin-top:6px" onclick="Entry.reocr()">🔄 もう一度読み取る</button>` : '')}
         <div class="row" style="margin-top:8px;gap:6px"><button class="btn sec sm" onclick="Entry.viewRc()">🔍 見る</button><button class="btn sec sm" onclick="Rc.pick('camera','entry')">📷 撮り直す</button><button class="btn sec sm" onclick="Entry.detachRc()">✕ 外す</button></div>
         ${rc.ocrText ? `<details class="more"><summary>読み取った文字を見る</summary><pre style="white-space:pre-wrap;font-size:12px;background:var(--surface2);padding:8px;border-radius:8px;max-height:200px;overflow:auto">${esc(rc.ocrText)}</pre></details>` : ''}
       </div></div>`;
@@ -2032,6 +2044,20 @@ Object.assign(Entry, {
     if (p.invoiceNo) { const n = $('f-note'); if (n && !n.value.includes(p.invoiceNo)) n.value = (n.value ? n.value + ' / ' : '') + '登録番号 ' + p.invoiceNo; }
     this.update();
   },
+  async reocr() {
+    const rc = this.rc; if (!rc) return;
+    busy('もう一度、文字を読み取っています…');
+    try {
+      const r = await API.call('reocrReceipt', { id: rc.id }, 120000);
+      unbusy();
+      if (!r.ok) throw new Error(r.error);
+      St.DB.receipts = St.DB.receipts.map(x => x.id === rc.id ? Object.assign({}, x, { ocrText: r.receipt.ocrText }) : x);
+      if (this.rc !== rc) return;
+      rc.ocrText = r.receipt.ocrText || ''; rc.parsed = Core.parseReceipt(rc.ocrText); rc.error = r.ocrError || '';
+      this.drawRc();
+      if (rc.ocrText) { this.applyParsed(false); toast('🔤 読み取りました。内容を確認してください'); } else toast('⚠️ ' + (r.ocrError || '読み取れませんでした'));
+    } catch (e) { unbusy(); alertBox('読み取れませんでした', e.message); }
+  },
   detachRc() {
     const rc = this.rc;
     this.rc = null; this.drawRc();
@@ -2071,7 +2097,7 @@ PAGES.receipts = () => {
   h += `<div class="card"><h3>🧾 まだ入力していない写真 <span class="sub">${unreg.length}枚</span></h3>${unreg.length ? `<div class="rc-grid">${unreg.map(r => {
     const p = Core.parseReceipt(r.ocrText || '');
     return `<div class="rc-card">${r.thumb ? `<img src="${attr(r.thumb)}" class="rc-thumb lg" onclick="Rc.view('${attr(r.id)}')" alt="レシート">` : `<div class="rc-thumb lg rc-ph" onclick="Rc.view('${attr(r.id)}')">🧾</div>`}
-      <div class="rc-info"><div class="t1">${esc(p.store || '（店名を読み取れず）')}</div><div class="muted">${p.date || '日付?'}　${p.amount ? '<b class="mono">' + fmt(p.amount) + '</b>' : '金額?'}</div><div class="muted" style="font-size:11px">撮影 ${esc(String(r.takenAt).slice(0, 16))}</div>
+      <div class="rc-info"><div class="t1">${esc(p.store || '（店名を読み取れず）')}</div>${!r.ocrText ? `<button class="btn sec sm" style="margin:2px 0" onclick="Rc.reocr('${attr(r.id)}')">🔄 もう一度読み取る</button>` : ''}<div class="muted">${p.date || '日付?'}　${p.amount ? '<b class="mono">' + fmt(p.amount) + '</b>' : '金額?'}</div><div class="muted" style="font-size:11px">撮影 ${esc(String(r.takenAt).slice(0, 16))}</div>
       <div class="row" style="gap:4px;margin-top:6px"><button class="btn sm" style="background:var(--red)" onclick="App.go('entry',{tab:'exp',receipt:'${attr(r.id)}'})">支出</button><button class="btn sm blue" onclick="App.go('entry',{tab:'inc',receipt:'${attr(r.id)}'})">収入</button><button class="btn sm orange" onclick="App.go('entry',{tab:'kai',receipt:'${attr(r.id)}'})">開業費</button><button class="btn danger sm" onclick="Rc.remove('${attr(r.id)}')">🗑</button></div></div></div>`;
   }).join('')}</div>` : emptyBox('✨', '未入力の写真はありません')}</div>`;
   // 登録済み（検索できる）
