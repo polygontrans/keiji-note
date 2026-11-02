@@ -1,2182 +1,958 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>経費ノート v2</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap');
-:root {
-  --bg:#f4f2ee;--surface:#fff;--surface2:#faf9f7;--border:#e2ddd7;
-  --accent:#2d6a4f;--accent2:#52b788;--accent-light:#d8f3dc;
-  --orange:#e07a2f;--orange-light:#fdebd0;
-  --text:#1a1a1a;--text2:#5a5650;--text3:#9a9490;
-  --red:#c0392b;--red-light:#fdecea;--blue:#1e40af;--blue-light:#dbeafe;
-  --purple:#6d28d9;--purple-light:#ede9fe;
-  --shadow:0 2px 12px rgba(0,0,0,.07);--shadow-lg:0 8px 32px rgba(0,0,0,.10);
-  --radius:12px;
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;}
+// ============================================================
+//  経費ノート — Google Apps Script バックエンド v3.1（複式簿記・領収書の写真に対応）
+//
+//  ■ 既存データについて
+//    ・「経費」「開業費」「収入」「減価償却」シートの既存の行・列は一切消しません。
+//    ・足りない列は「右端に追加」するだけです（既存列の並びは変えません）。
+//    ・「シート1」「収入・補助金」「請求書」など、このアプリが使わないシートには触れません。
+//    ・新しく「仕訳帳」「設定」「変更履歴」「領収書」シートを自動で作ります。
+//    ・領収書の写真は Googleドライブの「経費ノート_領収書」フォルダ（年ごと）に保存します。
+//
+//  ■ 領収書の文字認識（OCR）を使うには
+//    Apps Script の左メニュー「サービス ＋」→「Drive API」（v3）を追加してください。
+//    追加しなくても写真の保存はできます（文字の自動読み取りだけが使えません）。
+//
+//  ■ 使い方
+//    このファイルの中身をすべてコピーして Apps Script に貼り付け、
+//    「デプロイを管理 → 鉛筆アイコン → バージョン：新バージョン → デプロイ」で更新してください。
+//    （「新しいデプロイ」にするとURLが変わるので注意）
+// ============================================================
 
-/* SETUP */
-#setup-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
-.setup-card{background:var(--surface);border-radius:16px;padding:32px 28px;max-width:520px;width:100%;box-shadow:var(--shadow-lg);border:1px solid var(--border);}
-.setup-logo{font-size:44px;text-align:center;margin-bottom:8px;}
-.setup-title{font-size:22px;font-weight:700;text-align:center;margin-bottom:4px;}
-.setup-sub{font-size:13px;color:var(--text3);text-align:center;margin-bottom:22px;}
-.step-list{list-style:none;counter-reset:steps;margin-bottom:22px;}
-.step-list li{counter-increment:steps;padding:11px 11px 11px 44px;position:relative;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6;}
-.step-list li:last-child{border-bottom:none;}
-.step-list li::before{content:counter(steps);position:absolute;left:8px;top:11px;width:24px;height:24px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
-.step-list li strong{color:var(--accent);}
-.step-list li code{background:var(--surface2);padding:2px 6px;border-radius:4px;font-family:'DM Mono',monospace;font-size:12px;}
+var APP_VERSION    = '3.1.0';
+var SPREADSHEET_ID = '1GYGiuBr2t87Nvp1nUGsgxgVAJCmzmPmOMnr2-1BAcGY'; // 経費ノート
+var TZ             = 'Asia/Tokyo';
+var BACKUP_FOLDER  = '経費ノート_バックアップ';
+var RECEIPT_FOLDER = '経費ノート_領収書';
 
-/* HEADER */
-header{background:var(--accent);color:#fff;padding:0 16px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15);}
-.sync-badge{font-size:11px;padding:4px 10px;border-radius:20px;font-weight:700;background:rgba(255,255,255,.2);cursor:pointer;white-space:nowrap;}
-.sync-badge.error{background:rgba(255,80,80,.4);}
-
-/* TABS */
-.main-tabs{display:flex;background:var(--surface);border-bottom:2px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
-.main-tabs::-webkit-scrollbar{display:none;}
-.main-tab{padding:12px 14px;font-size:13px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit;transition:all .2s;flex-shrink:0;}
-.main-tab:hover{color:var(--accent);background:var(--accent-light);}
-.main-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:700;}
-
-/* CONTENT */
-.content{padding:14px;max-width:880px;margin:0 auto;}
-.section{display:none;}.section.active{display:block;}
-
-/* CARD */
-.card{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;box-shadow:var(--shadow);border:1px solid var(--border);}
-.card-title{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;gap:6px;}
-
-/* SUMMARY GRID */
-.summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;}
-@media(min-width:600px){.summary-grid{grid-template-columns:repeat(4,1fr);}}
-.stat-box{background:var(--surface2);border-radius:10px;padding:12px;border:1px solid var(--border);text-align:center;}
-.stat-label{font-size:11px;color:var(--text3);margin-bottom:3px;}
-.stat-value{font-family:'DM Mono',monospace;font-size:17px;font-weight:500;}
-.red{color:var(--red);}.orange{color:var(--orange);}.green{color:var(--accent);}.blue{color:var(--blue);}.purple{color:var(--purple);}
-
-/* FORM */
-.form-grid{display:grid;gap:10px;}
-@media(min-width:600px){.form-grid{grid-template-columns:repeat(2,1fr);}}
-.form-group{display:flex;flex-direction:column;gap:5px;}
-.form-group.full{grid-column:1/-1;}
-label{font-size:12px;font-weight:500;color:var(--text2);}
-.req{color:var(--red);}
-input,select,textarea{padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);color:var(--text);transition:border-color .2s;width:100%;}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent2);background:#fff;}
-textarea{resize:vertical;min-height:52px;}
-.hint{font-size:11px;color:var(--text3);margin-top:2px;}
-
-/* BUTTONS */
-.btn{padding:9px 16px;border-radius:8px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;border:none;transition:all .2s;display:inline-flex;align-items:center;gap:6px;}
-.btn-primary{background:var(--accent);color:#fff;}.btn-primary:hover{background:#1e4d38;}.btn-primary:disabled{background:#9a9490;cursor:not-allowed;}
-.btn-secondary{background:var(--surface2);color:var(--text);border:1.5px solid var(--border);}
-.btn-danger{background:var(--red-light);color:var(--red);border:none;}.btn-danger:hover{background:var(--red);color:#fff;}
-.btn-warning{background:var(--orange-light);color:var(--orange);border:none;}.btn-warning:hover{background:var(--orange);color:#fff;}
-.btn-sm{padding:5px 10px;font-size:12px;}
-.btn-orange{background:var(--orange);color:#fff;}.btn-orange:disabled{background:#9a9490;cursor:not-allowed;}
-.btn-blue{background:var(--blue);color:#fff;}.btn-blue:disabled{background:#9a9490;cursor:not-allowed;}
-.btn-purple{background:var(--purple);color:#fff;}
-
-/* TABLE */
-.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-table{width:100%;border-collapse:collapse;min-width:500px;}
-th{background:var(--surface2);padding:9px 11px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--border);}
-td{padding:9px 11px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
-tr:last-child td{border-bottom:none;}tr:hover td{background:var(--surface2);}
-.amount-cell{font-family:'DM Mono',monospace;text-align:right;font-weight:500;}
-
-/* BADGE */
-.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:11px;font-weight:700;}
-.bg{background:var(--accent-light);color:var(--accent);}
-.bo{background:var(--orange-light);color:var(--orange);}
-.bb{background:var(--blue-light);color:var(--blue);}
-.bgr{background:var(--surface2);color:var(--text3);border:1px solid var(--border);}
-.bpu{background:var(--purple-light);color:var(--purple);}
-.br{background:var(--red-light);color:var(--red);}
-
-/* ALERT */
-.alert{padding:10px 13px;border-radius:8px;font-size:13px;margin-bottom:12px;display:flex;gap:8px;align-items:flex-start;}
-.ai{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;}
-.aw{background:var(--orange-light);border:1px solid #fcd34d;color:#92400e;}
-.as{background:var(--accent-light);border:1px solid var(--accent2);color:var(--accent);}
-.ar{background:var(--red-light);border:1px solid #fca5a5;color:var(--red);}
-
-/* FILTER */
-.filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
-.filter-btn{padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:1.5px solid var(--border);background:var(--surface);color:var(--text2);font-family:inherit;}
-.filter-btn.active,.filter-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent);}
-
-/* EMPTY */
-.empty-state{text-align:center;padding:32px 16px;color:var(--text3);}
-.empty-state .ei{font-size:34px;margin-bottom:8px;}
-
-/* LOADING */
-.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:center;z-index:300;flex-direction:column;gap:12px;}
-.spinner{width:34px;height:34px;border:4px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg);}}
-
-/* 按分 */
-.按分card{background:linear-gradient(135deg,#f0faf4,#e8f5e9);border:2px solid var(--accent2);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
-.按分row{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:10px;}
-@media(max-width:599px){.按分row{grid-template-columns:1fr 1fr;}}
-.按分result{background:#fff;border-radius:8px;padding:10px 14px;font-size:13px;border:1px solid var(--accent2);margin-top:4px;}
-
-/* YEAR ROW */
-.year-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
-.year-row label{font-size:13px;font-weight:500;color:var(--text2);}
-.year-row select{width:auto;}
-
-/* BREAKDOWN BAR */
-.bkdown-item{display:flex;align-items:center;gap:10px;padding:8px 11px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-bottom:5px;}
-.bkdown-bar-wrap{flex:1;background:var(--border);border-radius:4px;height:5px;overflow:hidden;}
-.bkdown-bar{height:100%;background:var(--accent2);border-radius:4px;}
-.bkdown-name{width:120px;font-size:12px;font-weight:500;color:var(--text2);flex-shrink:0;}
-.bkdown-amt{font-family:'DM Mono',monospace;font-size:12px;width:85px;text-align:right;flex-shrink:0;}
-
-/* MODAL */
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;}
-.modal{background:var(--surface);border-radius:16px;padding:24px;max-width:540px;width:100%;box-shadow:var(--shadow-lg);max-height:90vh;overflow-y:auto;}
-.modal-title{font-size:16px;font-weight:700;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
-.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text3);padding:0 4px;}
-</style>
-</head>
-<body>
-
-<!-- LOADING -->
-<div class="loading-overlay" id="loading" style="display:none">
-  <div class="spinner"></div>
-  <div style="font-size:14px;color:var(--text2)" id="loading-msg">読み込み中…</div>
-</div>
-
-<!-- CHECKLIST MODAL -->
-<div class="modal-backdrop" id="checklist-modal" style="display:none">
-  <div class="modal">
-    <div class="modal-title">固定費チェック項目を追加 <button class="modal-close" onclick="closeChecklistModal()">✕</button></div>
-    <div class="form-grid">
-      <div class="form-group full"><label>項目名 <span class="req">*</span></label><input type="text" id="cl-name" placeholder="例：Adobe Creative Cloud"></div>
-      <div class="form-group"><label>アイコン</label><input type="text" id="cl-icon" placeholder="📌" maxlength="2" value="📌"></div>
-      <div class="form-group">
-        <label>勘定科目</label>
-        <select id="cl-cat">
-          <option value="通信費_AI">🤖 AIサービス</option>
-          <option value="諸会費_デザイン">🎨 デザインツール</option>
-          <option value="諸会費_クラウド">☁️ クラウドツール</option>
-          <option value="通信費_ドメイン">🌐 ドメイン・サーバー</option>
-          <option value="地代家賃_按分">🏠 家賃（按分）</option>
-          <option value="水道光熱費_按分">💡 電気代（按分）</option>
-          <option value="通信費_按分_net">🌐 ネット代（按分）</option>
-          <option value="通信費_按分_phone">📱 スマホ代（按分）</option>
-          <option value="損害保険料">🛡 損害保険料</option>
-          <option value="諸会費">📋 諸会費</option>
-          <option value="雑費">📎 雑費</option>
-        </select>
-      </div>
-    </div>
-    <div style="margin-top:14px"><button class="btn btn-primary" onclick="addChecklistItem()">追加</button></div>
-  </div>
-</div>
-
-<!-- SETUP -->
-<div id="setup-screen">
-<div class="setup-card">
-  <div class="setup-logo">📒</div>
-  <div class="setup-title">経費ノート v2</div>
-  <div class="setup-sub">Googleスプレッドシートと連携・青色申告対応</div>
-  <ol class="step-list">
-    <li>既存の「経費ノート」スプレッドシートを開く（または新規作成）</li>
-    <li>メニュー「<strong>拡張機能</strong>」→「<strong>Apps Script</strong>」を開く</li>
-    <li>既存コードを全部消して <code>gas-code.gs</code> の内容を貼り付けて<strong>保存</strong></li>
-    <li>「<strong>デプロイ</strong>」→「新しいデプロイ」→ 種類：<strong>ウェブアプリ</strong>・実行：<strong>自分</strong>・アクセス：<strong>全員</strong> → 承認する</li>
-    <li>表示された <strong>ウェブアプリのURL</strong>（<code>https://script.google.com/macros/s/...</code>）を下に貼り付ける</li>
-  </ol>
-  <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
-    <label style="font-size:13px;font-weight:700">ウェブアプリのURL <span class="req">*</span></label>
-    <input type="url" id="gas-url-input" placeholder="https://script.google.com/macros/s/...">
-    <div class="hint">このURLはブラウザに保存されます。スマホ・PCで同じURLを使えば同じデータにアクセスできます。</div>
-  </div>
-  <button class="btn btn-primary" style="width:100%;justify-content:center;font-size:15px" onclick="connectGAS()">🔗 接続して始める</button>
-  <div style="margin-top:12px;padding:10px;background:var(--orange-light);border-radius:8px;font-size:12px;color:#92400e">
-    ⚠️ <strong>既存データは消えません</strong>。GASを更新しても「経費ノート」シートのデータはそのまま保持されます。
-  </div>
-</div>
-</div>
-
-<!-- APP -->
-<div id="app-screen" style="display:none">
-<header>
-  <div>
-    <div style="font-size:15px;font-weight:700">📒 経費ノート v2</div>
-    <div style="font-size:10px;opacity:.7" id="header-sub">青色申告・副業・個人事業主向け</div>
-  </div>
-  <div style="display:flex;gap:8px;align-items:center">
-    <span class="sync-badge" id="sync-status" onclick="loadData()">⟳ 同期中</span>
-    <button class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:none;font-size:11px" onclick="resetSetup()">⚙️ 設定</button>
-  </div>
-</header>
-
-<div class="main-tabs">
-  <button class="main-tab active" onclick="showSection('dashboard',this)">🏠 ホーム</button>
-  <button class="main-tab" onclick="showSection('add',this)">＋ 経費入力</button>
-  <button class="main-tab" onclick="showSection('income',this)">💰 収入</button>
-  <button class="main-tab" onclick="showSection('list',this)">📋 一覧</button>
-  <button class="main-tab" onclick="showSection('kaigyohi',this)">🌱 開業費</button>
-  <button class="main-tab" onclick="showSection('按分',this)">🏠 家事按分</button>
-  <button class="main-tab" onclick="showSection('deprec',this)">📦 減価償却</button>
-  <button class="main-tab" onclick="showSection('report',this)">📊 集計</button>
-  <button class="main-tab" onclick="showSection('guide',this)">📖 科目ガイド</button>
-</div>
-
-<div class="content">
-
-<!-- DASHBOARD -->
-<div id="section-dashboard" class="section active">
-  <div class="year-row">
-    <label>表示年度：</label>
-    <select id="dashYear" onchange="renderDashboard()">
-      <option value="2024">2024年</option>
-      <option value="2025">2025年</option>
-      <option value="2026" selected>2026年</option>
-      <option value="2027">2027年</option>
-    </select>
-    <button class="btn btn-secondary btn-sm" onclick="loadData()">🔄 最新に更新</button>
-  </div>
-  <div class="summary-grid">
-    <div class="stat-box"><div class="stat-label">経費合計（按分後）</div><div class="stat-value red" id="s-total">¥0</div></div>
-    <div class="stat-box"><div class="stat-label">収入・補助金合計</div><div class="stat-value blue" id="s-income">¥0</div></div>
-    <div class="stat-box"><div class="stat-label">開業費合計</div><div class="stat-value orange" id="s-k">¥0</div></div>
-    <div class="stat-box"><div class="stat-label">減価償却（年間）</div><div class="stat-value purple" id="s-deprec">¥0</div></div>
-  </div>
-  <div class="card"><div class="card-title">🗂 科目別内訳</div><div id="breakdown-list"></div></div>
-  <div class="card">
-    <div class="card-title" style="justify-content:space-between">
-      <span>📅 今月の固定費チェック</span>
-      <button class="btn btn-secondary btn-sm" onclick="openChecklistEditor()" style="text-transform:none;font-weight:500">＋ 項目を追加</button>
-    </div>
-    <div class="hint" style="margin-bottom:8px">毎月かかる費用の入力漏れを防ぐためのチェックリストです（経費一覧には影響しません）</div>
-    <div id="checklist-items"></div>
-    <div style="margin-top:10px;text-align:center">
-      <button class="btn btn-secondary btn-sm" onclick="toggleChecklistHistory()" id="checklist-history-toggle">📜 過去の入力履歴を確認（2024年〜）</button>
-    </div>
-    <div id="checklist-history" style="display:none;margin-top:12px"></div>
-  </div>
-  <div class="card"><div class="card-title">🕐 最近の入力</div><div id="recent-list"></div></div>
-</div>
-
-<!-- ADD RECORD -->
-<div id="section-add" class="section">
-  <!-- 外貨経費（USD汎用・TTMレート自動換算） -->
-  <div class="card" style="border:2px solid #f59e0b;background:#fffbeb">
-    <div class="card-title" style="color:#92400e">💱 外貨経費（USD → JPY 自動換算）</div>
-    <div class="alert" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#78350f">
-      📋 <strong>税務ルール</strong>：クレジットカードの請求額ではなく、<strong>実際に購入・利用した日（取引日）</strong>のTTM（仲値）で円換算するのが原則です。カードの引き落とし日ではありません。Etsy手数料・海外ツール代・その他外貨経費に対応。
-    </div>
-    <input type="hidden" id="edit-fxexp-id">
-    <div class="form-grid">
-      <div class="form-group">
-        <label>取引日（購入・利用日） <span class="req">*</span></label>
-        <input type="date" id="fxexp-date" onchange="fetchUSDRateExp()">
-        <div class="hint">カードの引き落とし日ではなく、実際に購入・利用した日</div>
-      </div>
-      <div class="form-group">
-        <label>勘定科目 <span class="req">*</span></label>
-        <select id="fxexp-cat">
-          <option value="支払手数料">💳 支払手数料（Etsy手数料等）</option>
-          <option value="通信費_AI">🤖 AIサービス・海外サブスク</option>
-          <option value="諸会費">📋 諸会費（ショップ出店料等）</option>
-          <option value="広告宣伝費">📣 広告宣伝費</option>
-          <option value="仕入高">📦 仕入（商品・材料）</option>
-          <option value="消耗品費">✏️ 消耗品費</option>
-          <option value="研修費">📚 研修費・海外セミナー</option>
-          <option value="雑費">📎 雑費</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>USD金額 <span class="req">*</span></label>
-        <input type="number" id="fxexp-usd" placeholder="例：19.00" min="0" step="0.01" oninput="calcFxExpJPY()">
-        <div class="hint">支払ったドル金額</div>
-      </div>
-      <div class="form-group">
-        <label>支払方法</label>
-        <select id="fxexp-pay">
-          <option value="クレジットカード" selected>クレジットカード</option>
-          <option value="Payoneer">Payoneer（ペイオニア）</option>
-          <option value="Wise">Wise（ワイズ）</option>
-          <option value="PayPal">PayPal</option>
-          <option value="銀行振込">銀行振込</option>
-          <option value="現金">現金</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>TTMレート（円/USD）</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="number" id="fxexp-rate" placeholder="自動取得中..." step="0.01" oninput="calcFxExpJPY()" style="flex:1">
-          <button class="btn btn-secondary btn-sm" onclick="fetchUSDRateExp()" title="レートを再取得">🔄</button>
-        </div>
-        <div class="hint" id="fxexp-rate-hint" style="color:var(--text3)">取引日を入力するとGoogleFinanceから自動取得</div>
-      </div>
-      <div class="form-group">
-        <label>円換算額（自動計算）</label>
-        <input type="number" id="fxexp-jpy" placeholder="自動計算されます" readonly style="background:#f0fdf4;font-weight:700;color:var(--accent)">
-        <div class="hint">USD × TTMレート（1円未満切り捨て）</div>
-      </div>
-      <div class="form-group full">
-        <label>内容・摘要 <span class="req">*</span></label>
-        <input type="text" id="fxexp-memo" placeholder="例：Etsyショップ設立手数料 / 商品分析リサーチ用購入">
-      </div>
-      <div class="form-group full"><label>メモ（任意）</label><textarea id="fxexp-note" placeholder="注文番号・カード名など（確定申告の際に役立ちます）"></textarea></div>
-    </div>
-    <div id="fxexp-preview" style="display:none;margin:10px 0;padding:12px 14px;background:#d1fae5;border-radius:8px;font-size:13px;border:1px solid #6ee7b7">
-      <strong id="fxexp-preview-text"></strong>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" id="fxexp-save-btn" onclick="saveFxExpense()" style="background:#f59e0b;color:#fff;font-weight:700">💾 外貨経費として保存</button>
-      <button class="btn btn-secondary" onclick="clearFxExpForm()">🔄 クリア</button>
-      <button class="btn btn-secondary btn-sm" id="cancel-fxexp-edit-btn" style="display:none" onclick="cancelFxExpEdit()">✕ キャンセル</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title" id="add-form-title">✏️ 経費を入力する（円建て）</div>
-    <div class="alert aw">📌 <div>レシート・領収書は必ず保管！青色申告は<strong>7年間</strong>の保存義務があります。</div></div>
-    <input type="hidden" id="edit-record-id">
-    <div class="form-grid">
-      <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="i-date"></div>
-      <div class="form-group"><label>金額（円）<span class="req">*</span></label><input type="number" id="i-amount" placeholder="例：5500" min="0" oninput="updateAmountPreview()"></div>
-      <div class="form-group">
-        <label>勘定科目 <span class="req">*</span></label>
-        <select id="i-cat" onchange="onCatChange()">
-          <option value="">-- 選択してください --</option>
-          <optgroup label="💻 AIツール・サブスク（全額経費）">
-            <option value="通信費_AI">🤖 AIサービス（ChatGPT・Claude等）</option>
-            <option value="諸会費_デザイン">🎨 デザインツール（Adobe・Canva等）</option>
-            <option value="諸会費_クラウド">☁️ クラウドツール（Notion・Dropbox等）</option>
-            <option value="通信費_ドメイン">🌐 ドメイン・サーバー代</option>
-          </optgroup>
-          <optgroup label="🏠 家事按分（割合自動計算）">
-            <option value="地代家賃_按分">🏠 家賃（按分）</option>
-            <option value="水道光熱費_按分">💡 電気代（按分）</option>
-            <option value="通信費_按分_net">🌐 インターネット代（按分）</option>
-            <option value="通信費_按分_phone">📱 スマホ代（按分）</option>
-          </optgroup>
-          <optgroup label="🚗 車関係">
-            <option value="旅費交通費_車">⛽ ガソリン代</option>
-            <option value="地代家賃_駐車場">🅿️ 駐車場代</option>
-            <option value="損害保険料_車">🛡 自動車保険（事業用分）</option>
-            <option value="車両費">🔧 車検・修理・維持費</option>
-          </optgroup>
-          <optgroup label="📦 よく使う">
-            <option value="消耗品費">✏️ 消耗品費</option>
-            <option value="旅費交通費">🚃 旅費交通費（電車・バス等）</option>
-            <option value="接待交際費">🍽 接待交際費</option>
-            <option value="広告宣伝費">📣 広告宣伝費</option>
-            <option value="工具器具備品">💻 工具器具備品（10万以上→減価償却へ）</option>
-            <option value="外注工賃">👤 外注工賃</option>
-            <option value="支払手数料">💳 支払手数料</option>
-            <option value="諸会費">📋 諸会費</option>
-            <option value="研修費">📚 研修費・セミナー代</option>
-            <option value="新聞図書費">📰 新聞図書費</option>
-            <option value="損害保険料">🛡 損害保険料</option>
-            <option value="通信費">📶 通信費（その他）</option>
-            <option value="租税公課">🏛 租税公課</option>
-            <option value="雑費">📎 雑費</option>
-          </optgroup>
-        </select>
-        <div class="hint" id="cat-hint"></div>
-      </div>
-      <div class="form-group"><label>内容・摘要 <span class="req">*</span></label><input type="text" id="i-memo" placeholder="例：ChatGPT Plus 月額・電車代（渋谷→新宿）"></div>
-      <div class="form-group">
-        <label>支払方法</label>
-        <select id="i-pay">
-          <option value="クレジットカード" selected>クレジットカード</option>
-          <option value="現金">現金</option>
-          <option value="銀行振込">銀行振込</option>
-          <option value="電子マネー">電子マネー・QR決済</option>
-          <option value="口座引落">口座引落（サブスク等）</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>事業使用割合（按分）</label>
-        <select id="i-ratio" onchange="updateAmountPreview()">
-          <option value="100">100%（全額事業用）</option>
-          <option value="80">80%</option>
-          <option value="50">50%</option>
-          <option value="30">30%</option>
-          <option value="20">20%</option>
-          <option value="custom">手入力</option>
-        </select>
-        <div class="hint" id="ratio-hint"></div>
-      </div>
-      <div class="form-group" id="custom-ratio-wrap" style="display:none">
-        <label>按分割合（%）</label>
-        <input type="number" id="i-ratio-custom" placeholder="例：20" min="1" max="100" oninput="updateAmountPreview()">
-      </div>
-      <div class="form-group full"><label>メモ（任意）</label><textarea id="i-note" placeholder="なぜ事業用か・相手先など。税務調査の際に役立ちます"></textarea></div>
-    </div>
-    <div id="amount-preview" style="margin-top:10px;padding:10px 14px;background:var(--accent-light);border-radius:8px;font-size:13px;display:none">
-      💡 按分後の経費額：<strong id="amount-preview-val" style="font-family:'DM Mono',monospace;color:var(--accent);font-size:15px"></strong>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary" id="save-btn" onclick="saveRecord()">💾 スプレッドシートに保存</button>
-      <button class="btn btn-secondary" onclick="clearRecordForm()">🔄 クリア</button>
-      <button class="btn btn-secondary btn-sm" id="cancel-edit-btn" style="display:none" onclick="cancelEdit()">✕ キャンセル</button>
-    </div>
-  </div>
-</div>
-
-<!-- INCOME -->
-<div id="section-income" class="section">
-  <div class="alert ai">💰 <div><strong>収入・補助金・給付金</strong>は経費ではなく「売上・収入」として記録します。補助金・給付金は原則として課税対象の収入です。</div></div>
-
-  <!-- 外貨売上（USD汎用） パネル -->
-  <div class="card" style="border:2px solid #f59e0b;background:#fffbeb">
-    <div class="card-title" style="color:#92400e">💱 外貨売上（USD → JPY 自動換算）</div>
-    <div class="alert" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#78350f">
-      📋 <strong>税務ルール</strong>：売上日のTTM（仲値）で円換算するのが国税庁の原則です。GoogleFinanceの終値レート（TTM近似値）を自動取得して記録します。Etsy・翻訳・その他海外取引すべてに対応。一度決めたら年間同じ方法を継続してください。
-    </div>
-    <input type="hidden" id="edit-fx-id">
-    <div class="form-grid">
-      <div class="form-group">
-        <label>売上日 <span class="req">*</span></label>
-        <input type="date" id="etsy-date" onchange="fetchUSDRate()">
-        <div class="hint">入力すると自動でレートを取得します</div>
-      </div>
-      <div class="form-group">
-        <label>仕事の種類 <span class="req">*</span></label>
-        <select id="etsy-source">
-          <option value="Etsy売上">🛍 Etsy（スタンプ・デジタル販売）</option>
-          <option value="翻訳売上">📝 翻訳・ライティング</option>
-          <option value="CG制作売上">🎨 CG・デザイン制作</option>
-          <option value="海外フリーランス">💼 海外フリーランス（その他）</option>
-          <option value="外貨売上">💱 その他外貨売上</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>USD金額 <span class="req">*</span></label>
-        <input type="number" id="etsy-usd" placeholder="例：25.50" min="0" step="0.01" oninput="calcEtsyJPY()">
-        <div class="hint">受取金額（ドル）</div>
-      </div>
-      <div class="form-group">
-        <label>受取方法</label>
-        <select id="etsy-pay">
-          <option value="Payoneer">Payoneer（ペイオニア）</option>
-          <option value="Wise">Wise（ワイズ）</option>
-          <option value="PayPal">PayPal</option>
-          <option value="銀行振込">銀行振込（直接入金）</option>
-          <option value="Etsy Payments">Etsy Payments（Etsy残高）</option>
-          <option value="その他">その他</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>TTMレート（円/USD）</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="number" id="etsy-rate" placeholder="自動取得中..." step="0.01" oninput="calcEtsyJPY()" style="flex:1">
-          <button class="btn btn-secondary btn-sm" onclick="fetchUSDRate()" title="レートを再取得">🔄</button>
-        </div>
-        <div class="hint" id="etsy-rate-hint" style="color:var(--text3)">売上日を入力するとGoogleFinanceから自動取得</div>
-      </div>
-      <div class="form-group">
-        <label>円換算額（自動計算）</label>
-        <input type="number" id="etsy-jpy" placeholder="自動計算されます" readonly style="background:#f0fdf4;font-weight:700;color:var(--accent)">
-        <div class="hint">USD × TTMレート（1円未満切り捨て）</div>
-      </div>
-      <div class="form-group full">
-        <label>内容・摘要 <span class="req">*</span></label>
-        <input type="text" id="etsy-memo" placeholder="例：スタンプ販売3点 / 翻訳業務（〇〇社）">
-      </div>
-      <div class="form-group full"><label>メモ（任意）</label><textarea id="etsy-note" placeholder="注文番号・クライアント名・Payonner受取日など（確定申告の際に役立ちます）"></textarea></div>
-    </div>
-    <div id="etsy-preview" style="display:none;margin:10px 0;padding:12px 14px;background:#d1fae5;border-radius:8px;font-size:13px;border:1px solid #6ee7b7">
-      <strong id="etsy-preview-text"></strong>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn" id="etsy-save-btn" onclick="saveEtsyIncome()" style="background:#f59e0b;color:#fff;font-weight:700">💾 外貨売上として保存</button>
-      <button class="btn btn-secondary" onclick="clearEtsyForm()">🔄 クリア</button>
-      <button class="btn btn-secondary btn-sm" id="cancel-fx-edit-btn" style="display:none" onclick="cancelFxEdit()">✕ キャンセル</button>
-    </div>
-  </div>
-
-  <!-- 通常の収入入力 -->
-  <div class="card">
-    <div class="card-title" id="inc-form-title">💰 収入・補助金を入力する（円建て）</div>
-    <input type="hidden" id="edit-income-id">
-    <div class="form-grid">
-      <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="inc-date"></div>
-      <div class="form-group"><label>金額（円）<span class="req">*</span></label><input type="number" id="inc-amount" placeholder="例：100000" min="0"></div>
-      <div class="form-group">
-        <label>種類 <span class="req">*</span></label>
-        <select id="inc-type">
-          <option value="売上">💼 売上（仕事の報酬）</option>
-          <option value="補助金">🏛 補助金（IT導入・ものづくり等）</option>
-          <option value="給付金">💴 給付金（持続化給付金等）</option>
-          <option value="助成金">📋 助成金</option>
-          <option value="家賃収入">🏠 家賃収入</option>
-          <option value="その他収入">📎 その他収入</option>
-        </select>
-        <div class="hint">補助金・給付金・家賃収入は課税対象です。申告漏れに注意！</div>
-      </div>
-      <div class="form-group"><label>内容・摘要 <span class="req">*</span></label><input type="text" id="inc-memo" placeholder="例：〇〇様 デザイン制作費・IT導入補助金"></div>
-      <div class="form-group full"><label>メモ（任意）</label><textarea id="inc-note" placeholder="補助金の場合は申請番号や事業名を記録しておくと◎"></textarea></div>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-blue" id="inc-save-btn" onclick="saveIncome()">💾 収入として保存</button>
-      <button class="btn btn-secondary" onclick="clearIncomeForm()">🔄 クリア</button>
-      <button class="btn btn-secondary btn-sm" id="cancel-inc-edit-btn" style="display:none" onclick="cancelIncEdit()">✕ キャンセル</button>
-    </div>
-  </div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" style="margin:0">📋 収入・補助金リスト</div>
-      <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:var(--blue)" id="inc-total-disp">合計 ¥0</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>日付</th><th>種類</th><th>内容</th><th style="text-align:right">金額（円）</th><th style="text-align:right">USD</th><th>操作</th></tr></thead>
-        <tbody id="inc-body"></tbody>
-      </table>
-    </div>
-    <div id="inc-empty" class="empty-state" style="display:none"><div class="ei">💴</div><p>まだ登録がありません</p></div>
-  </div>
-</div>
-
-<!-- LIST -->
-<div id="section-list" class="section">
-  <div class="card">
-    <div class="card-title">🔍 絞り込み</div>
-    <div class="filter-row" id="filter-cats"><button class="filter-btn active" onclick="filterCat('all',this)">すべて</button></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <select id="f-year" onchange="renderList()" style="width:auto">
-        <option value="">年度（全て）</option>
-        <option value="2024">2024年</option><option value="2025">2025年</option>
-        <option value="2026" selected>2026年</option><option value="2027">2027年</option>
-      </select>
-      <select id="f-month" onchange="renderList()" style="width:auto">
-        <option value="">月（全て）</option>
-        <option value="01">1月</option><option value="02">2月</option><option value="03">3月</option>
-        <option value="04">4月</option><option value="05">5月</option><option value="06">6月</option>
-        <option value="07">7月</option><option value="08">8月</option><option value="09">9月</option>
-        <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
-      </select>
-    </div>
-  </div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="card-title" style="margin:0">📋 経費一覧</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span id="l-count" style="font-size:12px;color:var(--text3)">0件</span>
-        <span id="l-total" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--red)"></span>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>日付</th><th>科目</th><th>内容</th><th>支払</th><th style="text-align:right">按分後金額</th><th>操作</th></tr></thead>
-        <tbody id="records-body"></tbody>
-      </table>
-    </div>
-    <div id="l-empty" class="empty-state" style="display:none"><div class="ei">📋</div><p>経費がありません</p></div>
-  </div>
-</div>
-
-<!-- KAIGYOHI -->
-<div id="section-kaigyohi" class="section">
-  <div class="alert as">🌱 <div><strong>開業費とは</strong>：開業前に事業のためにかかった費用。開業後、利益が出た年に任意で経費として計上（任意償却）できます。EtsyやCG制作の準備費用はここに記録しましょう。</div></div>
-  <div class="card">
-    <div class="card-title" id="k-form-title">🌱 開業費を入力する</div>
-    <input type="hidden" id="edit-k-id">
-    <div class="form-grid">
-      <div class="form-group"><label>日付 <span class="req">*</span></label><input type="date" id="k-date"></div>
-      <div class="form-group"><label>金額（円）<span class="req">*</span></label><input type="number" id="k-amount" placeholder="例：50000" min="0"></div>
-      <div class="form-group">
-        <label>カテゴリ <span class="req">*</span></label>
-        <select id="k-cat">
-          <option value="通信費">📱 通信費・ネット費用</option>
-          <option value="消耗品費">✏️ 消耗品・備品購入</option>
-          <option value="広告宣伝費">📣 広告費・PR費用</option>
-          <option value="研修費">📚 セミナー・研修・書籍代</option>
-          <option value="旅費交通費">🚃 交通費</option>
-          <option value="諸会費">📋 会費・登録費</option>
-          <option value="支払手数料">💳 手数料</option>
-          <option value="その他開業費">📎 その他</option>
-        </select>
-      </div>
-      <div class="form-group"><label>内容 <span class="req">*</span></label><input type="text" id="k-memo" placeholder="例：Etsy出品用パソコン・CG制作ソフト購入"></div>
-      <div class="form-group full"><label>メモ（任意）</label><textarea id="k-note" placeholder="購入先・事業との関連など"></textarea></div>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-orange" id="k-save-btn" onclick="saveKaigyohi()">💾 開業費として保存</button>
-      <button class="btn btn-secondary" onclick="clearKaigyohiForm()">🔄 クリア</button>
-      <button class="btn btn-secondary btn-sm" id="cancel-k-edit-btn" style="display:none" onclick="cancelKEdit()">✕ キャンセル</button>
-    </div>
-  </div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" style="margin:0">📋 開業費リスト</div>
-      <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:var(--orange)" id="k-total-disp">合計 ¥0</span>
-    </div>
-    <div class="alert ai" style="margin-bottom:10px">💡 <div>開業後に経費として計上する場合は「経費に移動」ボタンを押してください。経費シートに自動的に追加されます。</div></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>日付</th><th>カテゴリ</th><th>内容</th><th style="text-align:right">金額</th><th>操作</th></tr></thead>
-        <tbody id="k-body"></tbody>
-      </table>
-    </div>
-    <div id="k-empty" class="empty-state" style="display:none"><div class="ei">🌱</div><p>開業費の登録がありません</p></div>
-  </div>
-</div>
-
-<!-- 家事按分 -->
-<div id="section-按分" class="section">
-  <div class="alert as">🏠 <div><strong>家事按分とは</strong>：自宅で仕事をしている場合、家賃・電気代・ネット代・スマホ代を「仕事で使う割合」だけ経費にできます。<strong>家賃は面積</strong>、<strong>電気・ネット・スマホは時間</strong>で計算するのが一般的です。</div></div>
-  <div class="alert ar">❌ <div><strong>ガス・水道代は経費にできません</strong>（税務署は「仕事でガス・水は使わない」と判断します）。</div></div>
-
-  <!-- 割合設定：家賃（面積按分） -->
-  <div class="按分card">
-    <div class="card-title">🏠 家賃用の按分割合（面積按分）</div>
-    <div class="按分row">
-      <div class="form-group"><label>自宅全体の面積（㎡）</label><input type="number" id="area-total" placeholder="例：66.34" oninput="calcAreaRatio()"></div>
-      <div class="form-group"><label>仕事専用スペース（㎡）</label><input type="number" id="area-work" placeholder="例：6" oninput="calcAreaRatio()"></div>
-      <div class="form-group"><label>算出割合</label><input type="text" id="area-ratio-auto" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
-    </div>
-    <div class="form-group" style="max-width:260px;margin-top:6px">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="area-ratio-override" onchange="calcAreaRatio()" style="width:auto"> 割合を手動で上書きする</label>
-      <input type="number" id="area-ratio-manual" placeholder="例：9" min="1" max="100" oninput="calcAreaRatio()" style="margin-top:6px" disabled>
-    </div>
-    <div class="按分result" id="area-ratio-preview">面積を入力すると割合が自動計算されます</div>
-  </div>
-
-  <!-- 割合設定：電気・ネット・スマホ（時間按分） -->
-  <div class="按分card">
-    <div class="card-title">💡 電気・ネット・スマホ用の按分割合（時間按分）</div>
-    <div class="按分row">
-      <div class="form-group"><label>1日の仕事時間（時間）</label><input type="number" id="time-hours" placeholder="例：4" max="24" oninput="calcTimeRatio()"></div>
-      <div class="form-group"><label>週に仕事する日数</label><input type="number" id="time-days" placeholder="例：6" max="7" oninput="calcTimeRatio()"></div>
-      <div class="form-group"><label>算出割合</label><input type="text" id="time-ratio-auto" readonly style="background:#fff;font-weight:700;color:var(--accent)"></div>
-    </div>
-    <div class="hint">計算式：仕事時間 ÷ 24時間 × 仕事日数 ÷ 7日（国税庁の在宅勤務費用FAQの考え方を参考にした目安）</div>
-    <div class="form-group" style="max-width:260px;margin-top:6px">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="time-ratio-override" onchange="calcTimeRatio()" style="width:auto"> 割合を手動で上書きする</label>
-      <input type="number" id="time-ratio-manual" placeholder="例：17" min="1" max="100" oninput="calcTimeRatio()" style="margin-top:6px" disabled>
-    </div>
-    <div class="按分result" id="time-ratio-preview">時間と日数を入力すると割合が自動計算されます</div>
-  </div>
-
-  <div style="text-align:right;margin-bottom:14px">
-    <button class="btn btn-primary" onclick="save按分Ratios()">💾 割合設定を保存</button>
-  </div>
-
-  <!-- 今月の按分経費を登録 -->
-  <div class="card">
-    <div class="card-title">📅 今月の家事按分経費を登録する</div>
-    <div class="alert ai">💡 <div>請求額がわかったら金額を入力 → 計算結果を確認して「経費に登録」を押すだけ。按分の内訳（割合の根拠）も自動でメモに記録され、後から経費一覧で編集できます。</div></div>
-    <div id="monthly按分-rows"></div>
-  </div>
-
-  <!-- カスタム按分 -->
-  <div class="card">
-    <div class="card-title">✨ カスタム按分（火災保険など、臨時で按分したいもの）</div>
-    <div class="form-grid">
-      <div class="form-group"><label>日付</label><input type="date" id="custom按分-date"></div>
-      <div class="form-group"><label>項目名 <span class="req">*</span></label><input type="text" id="custom按分-name" placeholder="例：火災保険料（年払い）"></div>
-      <div class="form-group"><label>金額（円） <span class="req">*</span></label><input type="number" id="custom按分-amount" min="0" oninput="updateCustom按分Preview()"></div>
-      <div class="form-group">
-        <label>使う割合</label>
-        <select id="custom按分-ratiotype" onchange="updateCustom按分Preview()">
-          <option value="area">家賃用の割合（面積按分）</option>
-          <option value="time">電気・ネット・スマホ用の割合（時間按分）</option>
-          <option value="manual">手動で入力</option>
-        </select>
-      </div>
-      <div class="form-group" id="custom按分-manual-wrap" style="display:none">
-        <label>割合（%）</label><input type="number" id="custom按分-manual" min="1" max="100" oninput="updateCustom按分Preview()">
-      </div>
-      <div class="form-group">
-        <label>勘定科目</label>
-        <select id="custom按分-cat">
-          <option value="損害保険料">🛡 損害保険料（火災保険など）</option>
-          <option value="水道光熱費_按分">💡 水道光熱費</option>
-          <option value="地代家賃_按分">🏠 地代家賃</option>
-          <option value="通信費">📶 通信費</option>
-          <option value="雑費">📎 雑費</option>
-        </select>
-      </div>
-    </div>
-    <div id="custom按分-preview" class="按分result" style="display:none;margin-top:10px"></div>
-    <div style="margin-top:12px">
-      <button class="btn btn-primary" onclick="registerCustom按分()">💾 経費に登録</button>
-    </div>
-  </div>
-</div>
-
-<!-- 減価償却 -->
-<div id="section-deprec" class="section">
-  <div class="alert ai">📦 <div><strong>10万円以上の資産</strong>（パソコン・カメラ・家具等）は一括経費にできません。耐用年数にわたって毎年少しずつ経費にします（減価償却）。青色申告なら30万円未満は一括で経費にできる特例もあります。</div></div>
-  <div class="alert as">✨ <div><strong>青色申告特例（少額減価償却資産）</strong>：青色申告者は取得価額30万円未満の資産を購入年に全額経費にできます（年間300万円まで）。開業後はこの特例を活用しましょう。</div></div>
-  <div class="card">
-    <div class="card-title">📦 固定資産を登録する</div>
-    <div class="form-grid">
-      <div class="form-group"><label>取得日 <span class="req">*</span></label><input type="date" id="dep-date"></div>
-      <div class="form-group"><label>品名 <span class="req">*</span></label><input type="text" id="dep-name" placeholder="例：MacBook Pro・デジタル一眼カメラ"></div>
-      <div class="form-group"><label>取得価額（円）<span class="req">*</span></label><input type="number" id="dep-cost" placeholder="例：200000" min="0" oninput="calcDeprec()"></div>
-      <div class="form-group">
-        <label>耐用年数 <span class="req">*</span></label>
-        <select id="dep-years" onchange="calcDeprec()">
-          <option value="2">2年（ソフトウェア）</option>
-          <option value="4" selected>4年（パソコン・自動車）</option>
-          <option value="5">5年（カメラ・サーバー）</option>
-          <option value="6">6年（テレビ・冷蔵庫）</option>
-          <option value="8">8年（家具）</option>
-          <option value="10">10年（金属製家具・自転車）</option>
-          <option value="custom">その他（直接入力）</option>
-        </select>
-      </div>
-      <div class="form-group" id="dep-years-custom-wrap" style="display:none">
-        <label>耐用年数（年）</label><input type="number" id="dep-years-custom" min="1" max="50" oninput="calcDeprec()">
-      </div>
-      <div class="form-group">
-        <label>償却方法</label>
-        <select id="dep-method" onchange="calcDeprec()">
-          <option value="定額法" selected>定額法（毎年同額）</option>
-          <option value="定率法">定率法（最初多く・後少なく）</option>
-        </select>
-        <div class="hint">個人事業主は原則「定額法」</div>
-      </div>
-      <div class="form-group">
-        <label>事業使用割合（%）</label>
-        <input type="number" id="dep-ratio" value="100" min="1" max="100" oninput="calcDeprec()">
-        <div class="hint">自宅兼用の場合は按分割合を入力</div>
-      </div>
-      <div class="form-group full"><label>メモ（任意）</label><textarea id="dep-note" placeholder="購入先・用途など"></textarea></div>
-    </div>
-    <div id="dep-preview" style="margin-top:10px;padding:12px 14px;background:var(--purple-light);border-radius:8px;font-size:13px;display:none">
-      <strong style="color:var(--purple)" id="dep-preview-text"></strong>
-    </div>
-    <div style="margin-top:14px">
-      <button class="btn btn-purple" id="dep-save-btn" onclick="saveDeprec()">💾 固定資産を登録</button>
-    </div>
-  </div>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div class="card-title" style="margin:0">📋 固定資産リスト</div>
-      <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:14px;color:var(--purple)" id="dep-total-disp">年間償却 ¥0</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>取得日</th><th>品名</th><th style="text-align:right">取得価額</th><th>耐用年数</th><th style="text-align:right">年間償却額</th><th>操作</th></tr></thead>
-        <tbody id="dep-body"></tbody>
-      </table>
-    </div>
-    <div id="dep-empty" class="empty-state" style="display:none"><div class="ei">📦</div><p>固定資産の登録がありません</p></div>
-  </div>
-</div>
-
-<!-- REPORT -->
-<div id="section-report" class="section">
-  <div class="year-row">
-    <label>集計年度：</label>
-    <select id="r-year" onchange="renderReport()">
-      <option value="2024">2024年</option><option value="2025">2025年</option>
-      <option value="2026" selected>2026年</option><option value="2027">2027年</option>
-    </select>
-  </div>
-  <div class="summary-grid">
-    <div class="stat-box"><div class="stat-label">収入合計</div><div class="stat-value blue" id="r-inc-total">¥0</div></div>
-    <div class="stat-box"><div class="stat-label">経費合計（按分後）</div><div class="stat-value red" id="r-exp-total">¥0</div></div>
-    <div class="stat-box"><div class="stat-label">利益（収入 − 経費）</div><div class="stat-value green" id="r-profit">¥0</div></div>
-    <div class="stat-box"><div class="stat-label">開業費合計</div><div class="stat-value orange" id="r-k-total">¥0</div></div>
-  </div>
-  <div class="card"><div class="card-title">📊 科目別経費内訳</div><div id="r-by-cat"></div></div>
-  <div class="card"><div class="card-title">💰 収入種類別内訳</div><div id="r-by-income"></div></div>
-  <div class="card">
-    <div class="card-title">📅 月別サマリー</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>月</th><th style="text-align:right">経費（按分後）</th><th style="text-align:right">収入</th><th>件数</th></tr></thead>
-        <tbody id="r-monthly"></tbody>
-      </table>
-    </div>
-  </div>
-  <div class="card"><div class="card-title">🌱 開業費・減価償却</div><div id="r-k"></div></div>
-</div>
-
-<!-- GUIDE -->
-<div id="section-guide" class="section">
-  <div class="alert ai">📖 <div>副業・個人事業主向けの主な勘定科目ガイドです。迷ったときに参考にしてください。</div></div>
-  <div id="guide-cards"></div>
-</div>
-
-</div><!-- /content -->
-</div><!-- /app-screen -->
-
-<script>
-// ══ STATE ══
-let GAS_URL = '';
-let records = [], kaigyohi = [], incomes = [], deprec = [];
-let currentFilterCat = 'all';
-let 按分設定 = {areaTotal:0, areaWork:0, areaRatio:0, timeHours:0, timeDays:0, timeRatio:0, checklist:null};
-
-const defaultChecklist = [
-  {name:'家賃', icon:'🏠', category:'地代家賃_按分'},
-  {name:'電気代', icon:'💡', category:'水道光熱費_按分'},
-  {name:'インターネット代', icon:'🌐', category:'通信費_按分_net'},
-  {name:'スマホ代', icon:'📱', category:'通信費_按分_phone'},
-  {name:'AIサービス', icon:'🤖', category:'通信費_AI'},
-];
-
-const monthly按分Items = [
-  {key:'rent',  icon:'🏠', label:'家賃',          category:'地代家賃_按分',     ratioType:'area'},
-  {key:'elec',  icon:'💡', label:'電気代',         category:'水道光熱費_按分',   ratioType:'time'},
-  {key:'net',   icon:'🌐', label:'インターネット代', category:'通信費_按分_net',   ratioType:'time'},
-  {key:'phone', icon:'📱', label:'スマホ代',        category:'通信費_按分_phone', ratioType:'time'},
-];
-
-// カテゴリヒント
-const catHints = {
-  '通信費_AI':'ChatGPT・Claude等のサブスク。全額経費になります。',
-  '諸会費_デザイン':'Adobe CC・Canva Pro等。全額経費になります。',
-  '工具器具備品':'10万円以上のPCや機材。減価償却タブへ登録をおすすめします。',
-  '地代家賃_按分':'家事按分タブで設定した割合が自動で適用されます。',
-  '水道光熱費_按分':'電気代のみ経費になります。ガス・水道は不可。',
-  '通信費_按分_net':'インターネット回線代。家事按分が適用されます。',
-  '通信費_按分_phone':'スマホ代。家事按分が適用されます。',
-  '接待交際費':'取引先との飲食代等。5,000円以下かつ領収書必須。',
-  '広告宣伝費':'Etsy出品費・SNS広告・名刺印刷等。',
+// ── シートの列定義（左から順番。既存シートは見出し名で列を探すので、並びが違っても動きます） ──
+var SCHEMAS = {
+  records: {
+    sheet: '経費', color: '#2d6a4f',
+    cols: [
+      ['id','ID'], ['date','日付'], ['category','勘定科目'], ['memo','内容'], ['payment','支払方法'],
+      ['amount','金額'], ['ratio','按分割合%'], ['adjusted','按分後金額'], ['note','メモ'],
+      ['kubun','所得区分'], ['updatedAt','更新日時'], ['receipt','領収書ID']
+    ]
+  },
+  kaigyohi: {
+    sheet: '開業費', color: '#e07a2f',
+    cols: [
+      ['id','ID'], ['date','日付'], ['category','カテゴリ'], ['memo','内容'], ['amount','金額'],
+      ['note','メモ'], ['moved','経費移動済み'], ['payment','支払方法'], ['updatedAt','更新日時'], ['receipt','領収書ID']
+    ]
+  },
+  incomes: {
+    sheet: '収入', color: '#1e40af',
+    cols: [
+      ['id','ID'], ['date','日付'], ['type','種類'], ['memo','内容'], ['amount','金額'], ['note','メモ'],
+      ['receive','入金先'], ['kubun','所得区分'], ['updatedAt','更新日時'], ['receipt','領収書ID']
+    ]
+  },
+  deprec: {
+    sheet: '減価償却', color: '#6d28d9',
+    cols: [
+      ['id','ID'], ['date','取得日'], ['name','品名'], ['cost','取得価額'], ['years','耐用年数'],
+      ['method','償却方法'], ['ratio','事業割合%'], ['annual','年間償却額'], ['note','メモ'],
+      ['startDate','事業供用日'], ['assetType','資産区分'], ['account','勘定科目'],
+      ['openingBook','開業時帳簿価額'], ['payment','支払方法'], ['kubun','所得区分'],
+      ['disposedDate','除却日'], ['manualAnnual','手入力償却額'], ['updatedAt','更新日時'], ['receipt','領収書ID']
+    ]
+  },
+  journals: {
+    sheet: '仕訳帳', color: '#0f766e',
+    cols: [
+      ['id','ID'], ['slip','伝票番号'], ['date','日付'], ['debit','借方科目'], ['credit','貸方科目'],
+      ['amount','金額'], ['memo','摘要'], ['kubun','所得区分'], ['kind','種別'], ['note','メモ'],
+      ['updatedAt','更新日時']
+    ]
+  },
+  receipts: {
+    sheet: '領収書', color: '#92400e',
+    cols: [
+      ['id','ID'], ['takenAt','撮影日時'], ['fileName','ファイル名'], ['url','URL'], ['fileId','ファイルID'],
+      ['status','状態'], ['linkKind','取引の種類'], ['linkId','取引ID'], ['ocrText','読み取った文字'],
+      ['note','メモ'], ['thumb','サムネイル'], ['updatedAt','更新日時']
+    ]
+  }
 };
+var RECEIPT_KINDS = { records:1, kaigyohi:1, incomes:1, deprec:1 };
+var NUMBER_KEYS = { amount:1, ratio:1, adjusted:1, cost:1, years:1, annual:1, openingBook:1, manualAnnual:1 };
+var DATE_KEYS   = { date:1, startDate:1, disposedDate:1 };
+var BOOL_KEYS   = { moved:1 };
+var DATETIME_KEYS = { updatedAt:1, takenAt:1 };
 
-// ガイドデータ
-const guideData = [
-  {icon:'🤖', cat:'通信費（AIサービス）', note:'全額経費 / 確実に経費になる', ex:'ChatGPT Plus・Claude Pro・Midjourney等の月額サブスク'},
-  {icon:'🎨', cat:'諸会費（デザインツール）', note:'全額経費 / 確実に経費になる', ex:'Adobe Creative Cloud・Canva Pro・Figma等'},
-  {icon:'☁️', cat:'諸会費（クラウドツール）', note:'全額経費 / 確実に経費になる', ex:'Notion・Dropbox・Google Workspace等'},
-  {icon:'🌐', cat:'通信費（ドメイン・サーバー）', note:'全額経費', ex:'お名前.com・エックスサーバー・Shopify等'},
-  {icon:'🏠', cat:'地代家賃（按分）', note:'家事按分 / 仕事割合のみ経費', ex:'家賃8万円 × 20% = 1.6万円が経費'},
-  {icon:'💡', cat:'水道光熱費（按分）', note:'電気代のみ可・ガス水道は不可', ex:'電気代8千円 × 20% = 1.6千円が経費'},
-  {icon:'📣', cat:'広告宣伝費', note:'全額経費', ex:'Etsy出品手数料・SNS広告・チラシ印刷・名刺代'},
-  {icon:'📚', cat:'研修費', note:'全額経費', ex:'Udemy・プログラミングスクール・業界セミナー参加費'},
-  {icon:'✏️', cat:'消耗品費', note:'10万円未満の物品', ex:'文房具・インク・梱包材・USBメモリ等'},
-  {icon:'💻', cat:'工具器具備品', note:'10万円以上 → 減価償却', ex:'PC・モニター・カメラ・CG制作用タブレット'},
-  {icon:'🚃', cat:'旅費交通費', note:'全額経費 / 目的地・理由を記録', ex:'取材・打ち合わせ・仕入れのための電車・バス代'},
-  {icon:'🍽', cat:'接待交際費', note:'5千円以下・相手先を記録', ex:'取引先との食事代（1人5千円以下が目安）'},
-  {icon:'📰', cat:'新聞図書費', note:'全額経費', ex:'Kindle技術書・業界誌・オライリー本・参考書'},
-];
+var SETTINGS_SHEET = '設定';
+var LOG_SHEET      = '変更履歴';
 
-// ══ SETUP ══
-function connectGAS() {
-  const url = document.getElementById('gas-url-input').value.trim();
-  if (!url.startsWith('https://script.google.com/')) {
-    alert('正しいGASのURLを入力してください。\nhttps://script.google.com/ で始まるURLです。');
-    return;
+// ============================================================
+//  入口
+// ============================================================
+function doPost(e) {
+  var result;
+  try {
+    var data = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    checkKey_(data.key);
+    result = handle_(data.action, data);
+  } catch (err) {
+    result = { ok: false, error: String(err && err.message ? err.message : err) };
   }
-  localStorage.setItem('keiji_gas_url', url);
-  GAS_URL = url;
-  startApp();
+  return json_(result);
 }
 
-function resetSetup() {
-  if (!confirm('設定をリセットしますか？（データは消えません）')) return;
-  localStorage.removeItem('keiji_gas_url');
-  document.getElementById('app-screen').style.display = 'none';
-  document.getElementById('setup-screen').style.display = 'flex';
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  var result;
+  try {
+    checkKey_(p.key);
+    if (p.action === 'ping')      result = ping_();
+    else if (p.action === 'init') { initSheets(); result = { ok: true, message: 'シートを準備しました（既存データはそのままです）' }; }
+    else                          result = getAllData();
+  } catch (err) {
+    result = { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+  return json_(result);
 }
 
-function startApp() {
-  document.getElementById('setup-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'block';
-  load按分Settings();
-  renderMonthly按分Rows();
-  renderGuide();
-  loadData();
-  // デフォルト日付を今日に設定（外貨売上フォームも含む）
-  const today = new Date().toISOString().split('T')[0];
-  ['i-date','inc-date','k-date','dep-date','etsy-date','fxexp-date'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = today;
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// 合言葉（任意）。スクリプトプロパティ APP_KEY を設定したときだけ有効になります。
+function checkKey_(key) {
+  var required = PropertiesService.getScriptProperties().getProperty('APP_KEY');
+  if (required && String(key || '') !== required) throw new Error('合言葉（アプリキー）が違います。アプリの設定画面で確認してください。');
+}
+
+function handle_(action, d) {
+  switch (action) {
+    case 'ping':            return ping_();
+    case 'init':            initSheets(); return { ok: true };
+    case 'getAll':          return getAllData();
+
+    // ── 経費（旧バージョンと同じ名前も使えます） ──
+    case 'addRecord':       return addRow_('records', d.record);
+    case 'updateRecord':    return updateRow_('records', d.record);
+    case 'delRecord':       return deleteRow_('records', d.id);
+    // ── 開業費 ──
+    case 'addKaigyohi':     return addRow_('kaigyohi', d.record);
+    case 'updateKaigyohi':  return updateRow_('kaigyohi', d.record);
+    case 'delKaigyohi':     return deleteRow_('kaigyohi', d.id);
+    case 'moveToRecord':    return moveKaigyohiToRecord_(d.id, d.category, d.date);
+    case 'moveToKaigyohi':  return moveRecordToKaigyohi_(d.id);
+    // ── 収入 ──
+    case 'addIncome':       return addRow_('incomes', d.record);
+    case 'updateIncome':    return updateRow_('incomes', d.record);
+    case 'delIncome':       return deleteRow_('incomes', d.id);
+    // ── 固定資産（減価償却） ──
+    case 'addDeprec':       return addRow_('deprec', d.record);
+    case 'updateDeprec':    return updateRow_('deprec', d.record);
+    case 'delDeprec':       return deleteRow_('deprec', d.id);
+    case 'recordToAsset':   return recordToAsset_(d.id, d.asset);
+    // ── 振替伝票（手動の仕訳） ──
+    case 'addJournal':      return addRow_('journals', d.record);
+    case 'updateJournal':   return updateRow_('journals', d.record);
+    case 'delJournal':      return deleteRow_('journals', d.id);
+    case 'saveSlip':        return saveSlip_(d.slip, d.lines);
+    case 'delSlip':         return deleteSlip_(d.slip);
+    // ── まとめて登録（定期取引など） ──
+    case 'batchAdd':        return batchAdd_(d.items);
+    // ── 設定 ──
+    case 'getSettings':     return { ok: true, settings: readSettings_() };
+    case 'saveSettings':    return saveSettings_(d.settings);
+    // ── 書き出し・バックアップ ──
+    case 'writeReport':     return writeReport_(d.name, d.rows);
+    case 'backup':          return backupNow();
+    case 'setupAutoBackup': return setupAutoBackup();
+    case 'getLog':          return getLog_(d.limit);
+    // ── 領収書の写真 ──
+    case 'uploadReceipt':   return uploadReceipt_(d.receipt, d.image, d.mime);
+    case 'getReceiptImage': return getReceiptImage_(d.id);
+    case 'updateReceipt':   return updateReceipt_(d.receipt);
+    case 'delReceipt':      return deleteReceipt_(d.id);
+    // ── 為替 ──
+    case 'getUSDRate':      return getUSDRate(d.date);
+    default:                return { ok: false, error: 'unknown action: ' + action };
+  }
+}
+
+function ping_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  return { ok: true, version: APP_VERSION, spreadsheet: ss.getName(), serverTime: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss'),
+           ocr: (typeof Drive !== 'undefined' && !!Drive.Files) };
+}
+
+// ============================================================
+//  シートの準備（何度実行しても安全。データは消しません）
+// ============================================================
+function initSheets() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  for (var kind in SCHEMAS) ensureSheet_(ss, kind);
+  ensureKVSheet_(ss, SETTINGS_SHEET, ['キー', '値（JSON）'], '#374151');
+  ensureKVSheet_(ss, LOG_SHEET, ['日時', '操作', 'シート', 'ID', '変更前', '変更後'], '#6b7280');
+  return { ok: true };
+}
+
+function ensureKVSheet_(ss, name, headers, color) {
+  var sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground(color).setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// シートと列を用意し、{key: 列番号(1始まり)} を返す
+function ensureSheet_(ss, kind) {
+  var schema = SCHEMAS[kind];
+  var sh = ss.getSheetByName(schema.sheet);
+  var headers = schema.cols.map(function (c) { return c[1]; });
+  if (!sh) {
+    sh = ss.insertSheet(schema.sheet);
+  }
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers])
+      .setFontWeight('bold').setBackground(schema.color).setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+  }
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var row1 = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (v) { return String(v).trim(); });
+  var map = {};
+  schema.cols.forEach(function (c, i) {
+    var key = c[0], name = c[1];
+    var idx = row1.indexOf(name);
+    if (idx >= 0) { map[key] = idx + 1; return; }
+    // 本来の位置の見出しが空欄なら、そこに見出しだけ書く（例：開業費のG列）
+    if (i < row1.length && row1[i] === '' && !isUsedIndex_(map, i + 1)) {
+      sh.getRange(1, i + 1).setValue(name).setFontWeight('bold');
+      row1[i] = name;
+      map[key] = i + 1;
+      return;
+    }
+    // 見つからなければ右端に列を追加（既存の列は動かさない）
+    var newCol = row1.length + 1;
+    sh.getRange(1, newCol).setValue(name).setFontWeight('bold').setBackground(schema.color).setFontColor('#ffffff');
+    row1.push(name);
+    map[key] = newCol;
+  });
+  return { sheet: sh, map: map, width: row1.length };
+}
+
+function isUsedIndex_(map, col) {
+  for (var k in map) if (map[k] === col) return true;
+  return false;
+}
+
+// ============================================================
+//  読み込み
+// ============================================================
+function getAllData() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  initSheets();
+  var out = { ok: true, version: APP_VERSION, serverTime: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss') };
+  for (var kind in SCHEMAS) out[kind] = readAll_(ss, kind);
+  // 取引に紐づいた領収書は、通信量を減らすためサムネイルを送らない
+  out.receipts.forEach(function (r) { if (r.status === '登録済') r.thumb = ''; });
+  out.ocr = (typeof Drive !== 'undefined' && !!Drive.Files);
+  out.settings = readSettings_();
+  return out;
+}
+
+function readAll_(ss, kind) {
+  var t = ensureSheet_(ss, kind);
+  var sh = t.sheet;
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, t.width).getValues();
+  var list = [];
+  values.forEach(function (row) {
+    var o = rowToObj_(row, t.map);
+    if (o.id) list.push(o);
+  });
+  return list;
+}
+
+function rowToObj_(row, map) {
+  var o = {};
+  for (var key in map) {
+    var v = row[map[key] - 1];
+    if (DATE_KEYS[key])        o[key] = normDate_(v);
+    else if (NUMBER_KEYS[key]) o[key] = (v === '' || v === null) ? '' : toNum(v);
+    else if (BOOL_KEYS[key])   o[key] = (v === true || String(v).toUpperCase() === 'TRUE');
+    else if (DATETIME_KEYS[key]) o[key] = (v instanceof Date) ? Utilities.formatDate(v, TZ, 'yyyy-MM-dd HH:mm:ss') : String(v || '');
+    else                       o[key] = (v === null || v === undefined) ? '' : String(v);
+  }
+  if (o.id) o.id = String(o.id).replace(/\.0$/, '');
+  return o;
+}
+
+// 日付を yyyy-MM-dd にそろえる（Date型・「2026/06/11」・「2026-6-1」に対応）
+function normDate_(v) {
+  if (!v) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  return s;
+}
+
+function toNum(v) {
+  if (v instanceof Date) return 0;
+  if (typeof v === 'number') return v;
+  var n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+
+// ============================================================
+//  書き込み（追加・更新・削除）— すべてロックして同時書き込みを防ぎ、変更履歴を残す
+// ============================================================
+function withLock_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try { return fn(); }
+  finally { lock.releaseLock(); }
+}
+
+function addRow_(kind, obj) {
+  if (!obj) return { ok: false, error: 'データがありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var r = appendObj_(ss, kind, obj);
+    if (!r.ok) return r;
+    log_(ss, '追加', SCHEMAS[kind].sheet, r.id, null, r.saved);
+    return { ok: true, id: r.id, newId: r.id };
   });
 }
 
-// ══ GAS COMMUNICATION ══
-async function gasRequest(payload) {
-  const res = await fetch(GAS_URL, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    redirect: 'follow',
-  });
-  return await res.json();
+function appendObj_(ss, kind, obj) {
+  var t = ensureSheet_(ss, kind);
+  var o = sanitize_(kind, obj);
+  if (!o.id) o.id = newId_();
+  var lockErr = checkLocked_(o);
+  if (lockErr) return { ok: false, error: lockErr };
+  if (findRow_(t, o.id) > 0) return { ok: false, error: '同じIDのデータがすでにあります（二重登録防止）: ' + o.id };
+  o.updatedAt = now_();
+  var row = new Array(t.width);
+  for (var i = 0; i < t.width; i++) row[i] = '';
+  for (var key in t.map) if (o.hasOwnProperty(key)) row[t.map[key] - 1] = o[key];
+  t.sheet.appendRow(row);
+  if (RECEIPT_KINDS[kind] && o.receipt) linkReceipt_(ss, o.receipt, kind, o);
+  return { ok: true, id: o.id, saved: o };
 }
 
-function setSyncStatus(state) {
-  const el = document.getElementById('sync-status');
-  if (state === 'ok') { el.textContent = '✅ 同期済み'; el.className = 'sync-badge'; }
-  else if (state === 'syncing') { el.textContent = '⟳ 同期中'; el.className = 'sync-badge'; }
-  else { el.textContent = '⚠️ エラー'; el.className = 'sync-badge error'; }
-}
-
-async function loadData() {
-  if (!GAS_URL) return;
-  setSyncStatus('syncing');
-  showLoading('スプレッドシートからデータを読み込み中…');
-  try {
-    const result = await gasRequest({action:'getAll'});
-    if (result.ok) {
-      records  = (result.records  ||[]).map(r=>({...r, amount:toNum(r.amount), ratio:toNum(r.ratio), adjusted:toNum(r.adjusted)}));
-      kaigyohi = (result.kaigyohi ||[]).map(k=>({...k, amount:toNum(k.amount)}));
-      incomes  = (result.incomes  ||[]).map(i=>({...i, amount:toNum(i.amount)}));
-      deprec   = (result.deprec   ||[]).map(d=>({...d, cost:toNum(d.cost), annual:toNum(d.annual)}));
-      setSyncStatus('ok');
-      renderDashboard(); renderList(); renderKaigyohi();
-      renderIncomes(); renderReport(); renderFilterButtons(); renderDeprec(); renderChecklist();
-      updateMonthly按分Placeholders();
-      if (document.getElementById('checklist-history').style.display !== 'none') renderChecklistHistory();
-    } else {
-      setSyncStatus('error');
-      alert('データの読み込みに失敗しました。\nエラー: ' + (result.error||'不明'));
+function updateRow_(kind, obj) {
+  if (!obj || !obj.id) return { ok: false, error: 'IDがありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var t = ensureSheet_(ss, kind);
+    var rowNo = findRow_(t, obj.id);
+    if (rowNo < 0) return { ok: false, error: '更新するデータが見つかりません（ID: ' + obj.id + '）' };
+    var range = t.sheet.getRange(rowNo, 1, 1, t.width);
+    var row = range.getValues()[0];
+    var before = rowToObj_(row, t.map);
+    var o = sanitize_(kind, obj);
+    var lockErr = checkLocked_(before) || checkLocked_(o);
+    if (lockErr) return { ok: false, error: lockErr };
+    o.updatedAt = now_();
+    // 渡された項目だけ上書き（知らない列・渡されていない項目はそのまま残す）
+    for (var key in t.map) if (o.hasOwnProperty(key) && key !== 'id') row[t.map[key] - 1] = o[key];
+    range.setValues([row]);
+    var after = rowToObj_(row, t.map);
+    if (RECEIPT_KINDS[kind] && o.hasOwnProperty('receipt') && String(before.receipt || '') !== String(o.receipt || '')) {
+      if (before.receipt) unlinkReceipt_(ss, before.receipt, obj.id);
+      if (o.receipt) linkReceipt_(ss, o.receipt, kind, after);
+    } else if (RECEIPT_KINDS[kind] && after.receipt) {
+      linkReceipt_(ss, after.receipt, kind, after); // 金額や内容が変わったらファイル名も更新
     }
-  } catch(e) {
-    setSyncStatus('error');
-    alert('接続エラーが発生しました。\nGASのURLとデプロイ設定を確認してください。\n\n詳細: ' + e.message);
-  } finally { hideLoading(); }
-}
-
-// ══ 家事按分：割合の計算 ══
-function calcAreaRatio() {
-  const total = parseFloat(document.getElementById('area-total').value)||0;
-  const work  = parseFloat(document.getElementById('area-work').value)||0;
-  const override = document.getElementById('area-ratio-override').checked;
-  document.getElementById('area-ratio-manual').disabled = !override;
-  const auto = total>0 ? Math.round(work/total*1000)/10 : 0;
-  document.getElementById('area-ratio-auto').value = auto?auto+'%':'';
-  let ratio;
-  if (override) ratio = parseFloat(document.getElementById('area-ratio-manual').value)||0;
-  else ratio = auto;
-  按分設定.areaTotal=total; 按分設定.areaWork=work; 按分設定.areaRatio=ratio;
-  document.getElementById('area-ratio-preview').innerHTML = ratio
-    ? `家賃用の按分割合：<strong>${ratio}%</strong>${override?'（手動設定）':` （${work}㎡ ÷ ${total}㎡）`}`
-    : '面積を入力すると割合が自動計算されます';
-  updateAll按分Previews();
-}
-
-function calcTimeRatio() {
-  const hours = parseFloat(document.getElementById('time-hours').value)||0;
-  const days  = parseFloat(document.getElementById('time-days').value)||0;
-  const override = document.getElementById('time-ratio-override').checked;
-  document.getElementById('time-ratio-manual').disabled = !override;
-  const auto = (hours>0&&days>0) ? Math.round((hours/24)*(days/7)*1000)/10 : 0;
-  document.getElementById('time-ratio-auto').value = auto?auto+'%':'';
-  let ratio;
-  if (override) ratio = parseFloat(document.getElementById('time-ratio-manual').value)||0;
-  else ratio = auto;
-  按分設定.timeHours=hours; 按分設定.timeDays=days; 按分設定.timeRatio=ratio;
-  document.getElementById('time-ratio-preview').innerHTML = ratio
-    ? `電気・ネット・スマホ用の按分割合：<strong>${ratio}%</strong>${override?'（手動設定）':` （1日${hours}時間 × 週${days}日 ÷ 7日）`}`
-    : '時間と日数を入力すると割合が自動計算されます';
-  updateAll按分Previews();
-}
-
-function updateAll按分Previews() {
-  monthly按分Items.forEach(item=>updateMonthly按分Preview(item.key));
-  updateCustom按分Preview();
-}
-
-function save按分Ratios() {
-  localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
-  alert('✅ 割合設定を保存しました！');
-}
-
-function load按分Settings() {
-  try {
-    const saved = localStorage.getItem('keiji_按分');
-    if (saved) {
-      const s = JSON.parse(saved);
-      Object.assign(按分設定, s);
-      if (按分設定.areaTotal) document.getElementById('area-total').value = 按分設定.areaTotal;
-      if (按分設定.areaWork)  document.getElementById('area-work').value  = 按分設定.areaWork;
-      if (按分設定.timeHours) document.getElementById('time-hours').value = 按分設定.timeHours;
-      if (按分設定.timeDays)  document.getElementById('time-days').value  = 按分設定.timeDays;
-    }
-  } catch(e){}
-  if (!按分設定.checklist) 按分設定.checklist = JSON.parse(JSON.stringify(defaultChecklist));
-  calcAreaRatio();
-  calcTimeRatio();
-}
-
-// ══ 家事按分：今月の経費入力 ══
-function renderMonthly按分Rows() {
-  const wrap = document.getElementById('monthly按分-rows');
-  if (!wrap) return;
-  const today = new Date().toISOString().split('T')[0];
-  wrap.innerHTML = monthly按分Items.map(item => `
-    <div class="card" style="background:var(--surface2);margin-bottom:10px;box-shadow:none">
-      <div style="font-weight:700;margin-bottom:8px;font-size:13px">${item.icon} ${item.label}</div>
-      <div class="form-grid">
-        <div class="form-group"><label>日付</label><input type="date" id="m-${item.key}-date" value="${today}"></div>
-        <div class="form-group"><label>今月の金額（円）</label><input type="number" id="m-${item.key}-amount" placeholder="請求額を入力" min="0" oninput="updateMonthly按分Preview('${item.key}')"></div>
-      </div>
-      <div class="按分result" id="m-${item.key}-preview" style="margin-top:8px;display:none"></div>
-      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="registerMonthly按分('${item.key}')">💾 経費に登録</button></div>
-    </div>`).join('');
-}
-
-function updateMonthly按分Placeholders() {
-  monthly按分Items.forEach(item => {
-    const input = document.getElementById(`m-${item.key}-amount`);
-    if (!input) return;
-    const matches = records.filter(r=>r.category===item.category).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-    if (matches.length) {
-      input.placeholder = `前回(${matches[0].date}): ${fmt(matches[0].amount).replace('¥','')}円`;
-    }
+    log_(ss, '修正', SCHEMAS[kind].sheet, obj.id, before, after);
+    return { ok: true, id: String(obj.id) };
   });
 }
 
-function updateMonthly按分Preview(key) {
-  const item = monthly按分Items.find(i=>i.key===key);
-  const amountEl = document.getElementById(`m-${key}-amount`);
-  if (!amountEl) return;
-  const amount = parseFloat(amountEl.value)||0;
-  const ratio = item.ratioType==='area' ? 按分設定.areaRatio : 按分設定.timeRatio;
-  const preview = document.getElementById(`m-${key}-preview`);
-  if (!amount || !ratio) { preview.style.display='none'; return; }
-  const adjusted = Math.round(amount*ratio/100);
-  preview.style.display='block';
-  preview.innerHTML = `${item.label} ${fmt(amount)} × <strong>${ratio}%</strong>（${item.ratioType==='area'?'面積':'時間'}按分） ＝ <strong style="color:var(--accent);font-family:'DM Mono',monospace;font-size:15px">${fmt(adjusted)}</strong>`;
-}
-
-async function registerMonthly按分(key) {
-  const item = monthly按分Items.find(i=>i.key===key);
-  const date = document.getElementById(`m-${key}-date`).value;
-  const amount = parseFloat(document.getElementById(`m-${key}-amount`).value)||0;
-  if (!date || !amount) { alert('日付と金額を入力してください'); return; }
-  const ratio = item.ratioType==='area' ? 按分設定.areaRatio : 按分設定.timeRatio;
-  if (!ratio) { alert('先に按分割合を設定して「割合設定を保存」を押してください'); return; }
-  const adjusted = Math.round(amount*ratio/100);
-  const note = item.ratioType==='area'
-    ? `家事按分: ${item.label}${fmt(amount)} × ${ratio}%（面積按分: 仕事スペース${按分設定.areaWork}㎡ ÷ 全体${按分設定.areaTotal}㎡）`
-    : `家事按分: ${item.label}${fmt(amount)} × ${ratio}%（時間按分: 1日${按分設定.timeHours}時間÷24時間 × 週${按分設定.timeDays}日÷7日）`;
-  const record = {id:Date.now(), date, category:item.category, memo:item.label+'（家事按分）', payment:'クレジットカード', amount, ratio, adjusted, note};
-  showLoading('経費に登録中…');
-  try {
-    const result = await gasRequest({action:'addRecord', record});
-    if (result.ok) {
-      records.push(record);
-      document.getElementById(`m-${key}-amount`).value='';
-      document.getElementById(`m-${key}-preview`).style.display='none';
-      renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
-      updateMonthly按分Placeholders(); renderChecklist();
-      if (document.getElementById('checklist-history').style.display !== 'none') renderChecklistHistory();
-      alert(`✅ ${item.label}を経費に登録しました！\n内容は「一覧」タブから後で修正できます。`);
-    } else { alert('登録に失敗しました: '+(result.error||'')); }
-  } catch(e){ alert('エラー: '+e.message); }
-  finally { hideLoading(); }
-}
-
-// ══ 家事按分：カスタム ══
-function updateCustom按分Preview() {
-  const amount = parseFloat(document.getElementById('custom按分-amount').value)||0;
-  const ratioType = document.getElementById('custom按分-ratiotype').value;
-  document.getElementById('custom按分-manual-wrap').style.display = ratioType==='manual'?'block':'none';
-  let ratio;
-  if (ratioType==='area') ratio = 按分設定.areaRatio;
-  else if (ratioType==='time') ratio = 按分設定.timeRatio;
-  else ratio = parseFloat(document.getElementById('custom按分-manual').value)||0;
-  const preview = document.getElementById('custom按分-preview');
-  if (!amount || !ratio) { preview.style.display='none'; return; }
-  const adjusted = Math.round(amount*ratio/100);
-  preview.style.display='block';
-  preview.innerHTML = `${fmt(amount)} × <strong>${ratio}%</strong> ＝ <strong style="color:var(--accent);font-family:'DM Mono',monospace;font-size:15px">${fmt(adjusted)}</strong>`;
-}
-
-async function registerCustom按分() {
-  const date = document.getElementById('custom按分-date').value;
-  const name = document.getElementById('custom按分-name').value.trim();
-  const amount = parseFloat(document.getElementById('custom按分-amount').value)||0;
-  const ratioType = document.getElementById('custom按分-ratiotype').value;
-  const category = document.getElementById('custom按分-cat').value;
-  if (!date||!name||!amount) { alert('日付・項目名・金額は必須です'); return; }
-  let ratio, methodLabel;
-  if (ratioType==='area') { ratio=按分設定.areaRatio; methodLabel=`面積按分: 仕事スペース${按分設定.areaWork}㎡÷全体${按分設定.areaTotal}㎡`; }
-  else if (ratioType==='time') { ratio=按分設定.timeRatio; methodLabel=`時間按分: 1日${按分設定.timeHours}時間÷24時間 × 週${按分設定.timeDays}日÷7日`; }
-  else { ratio=parseFloat(document.getElementById('custom按分-manual').value)||0; methodLabel='手動入力'; }
-  if (!ratio) { alert('按分割合が設定されていません'); return; }
-  const adjusted = Math.round(amount*ratio/100);
-  const note = `家事按分: ${name}${fmt(amount)} × ${ratio}%（${methodLabel}）`;
-  const record = {id:Date.now(), date, category, memo:name+'（家事按分）', payment:'口座引落', amount, ratio, adjusted, note};
-  showLoading('経費に登録中…');
-  try {
-    const result = await gasRequest({action:'addRecord', record});
-    if (result.ok) {
-      records.push(record);
-      ['custom按分-name','custom按分-amount'].forEach(id=>document.getElementById(id).value='');
-      document.getElementById('custom按分-preview').style.display='none';
-      renderDashboard(); renderList(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
-      renderChecklist();
-      if (document.getElementById('checklist-history').style.display !== 'none') renderChecklistHistory();
-      alert('✅ 経費に登録しました！');
-    } else { alert('登録に失敗しました: '+(result.error||'')); }
-  } catch(e){ alert('エラー: '+e.message); }
-  finally { hideLoading(); }
-}
-
-// ══ 今月の固定費チェックリスト ══
-function renderChecklist() {
-  const el = document.getElementById('checklist-items');
-  if (!el) return;
-  const now = new Date();
-  const ym = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  const items = 按分設定.checklist || defaultChecklist;
-  if (!items.length) { el.innerHTML = '<p style="color:var(--text3);font-size:13px;text-align:center;padding:12px">チェック項目がありません</p>'; return; }
-  el.innerHTML = items.map((item,idx)=>{
-    const foundRecords = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
-    const foundKaigyohi = kaigyohi.filter(k=>k.note && k.note.indexOf('経費より移動: '+item.category)===0 && String(k.date).startsWith(ym));
-    const total = foundRecords.reduce((s,r)=>s+toNum(r.adjusted),0) + foundKaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
-    const done = foundRecords.length>0 || foundKaigyohi.length>0;
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:18px">${item.icon}</span>
-        <span style="font-size:13px;font-weight:500">${item.name}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        ${done?`<span class="badge bg">✅ ${fmt(total)}${foundKaigyohi.length?'（開業費含む）':''}</span>`:`<span class="badge bgr">⚠️ 未入力</span><button class="btn btn-primary btn-sm" onclick="quickAddChecklist(${idx})">入力する</button>`}
-        <button class="btn btn-danger btn-sm" onclick="removeChecklistItem(${idx})" title="チェック項目を削除">✕</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function quickAddChecklist(idx) {
-  const item = (按分設定.checklist||defaultChecklist)[idx];
-  const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
-  if (按分Cats.includes(item.category)) {
-    showSection('按分', document.querySelectorAll('.main-tab')[5]);
-  } else {
-    showSection('add', document.querySelectorAll('.main-tab')[1]);
-    document.getElementById('i-cat').value = item.category;
-    onCatChange();
-    if (!document.getElementById('i-memo').value) document.getElementById('i-memo').value = item.name;
-  }
-  window.scrollTo(0,0);
-}
-
-// ── 過去の入力履歴（2024年〜） ──
-function toggleChecklistHistory() {
-  const el = document.getElementById('checklist-history');
-  const btn = document.getElementById('checklist-history-toggle');
-  if (el.style.display === 'none') {
-    renderChecklistHistory();
-    el.style.display = 'block';
-    btn.textContent = '📜 履歴を閉じる';
-  } else {
-    el.style.display = 'none';
-    btn.textContent = '📜 過去の入力履歴を確認（2024年〜）';
-  }
-}
-
-function renderChecklistHistory() {
-  const el = document.getElementById('checklist-history');
-  const items = 按分設定.checklist || defaultChecklist;
-  const now = new Date();
-  const months = [];
-  let y = 2024, m = 1;
-  while (y < now.getFullYear() || (y === now.getFullYear() && m <= now.getMonth()+1)) {
-    months.push(y + '-' + String(m).padStart(2,'0'));
-    m++; if (m > 12) { m = 1; y++; }
-  }
-  months.reverse();
-
-  let html = `<div class="hint" style="margin-bottom:8px">「＋」は未入力の月です。クリックすると入力画面に移動します（日付はその月の28日が入ります）。</div>`;
-  html += `<div class="table-wrap"><table><thead><tr><th>月</th>${items.map(i=>`<th style="text-align:center">${i.icon}${i.name}</th>`).join('')}</tr></thead><tbody>`;
-  months.forEach(ym => {
-    html += `<tr><td style="white-space:nowrap;font-weight:700">${ym}</td>`;
-    items.forEach(item => {
-      const foundRecords = records.filter(r=>r.category===item.category && String(r.date).startsWith(ym));
-      const foundKaigyohi = kaigyohi.filter(k=>k.note && k.note.indexOf('経費より移動: '+item.category)===0 && String(k.date).startsWith(ym));
-      if (foundRecords.length || foundKaigyohi.length) {
-        const total = foundRecords.reduce((s,r)=>s+toNum(r.adjusted),0) + foundKaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
-        const label = foundKaigyohi.length ? `${fmt(total)}<br><span style="font-size:10px;color:var(--text3)">(開業費)</span>` : fmt(total);
-        html += `<td class="amount-cell" style="color:var(--accent)">${label}</td>`;
-      } else {
-        html += `<td style="text-align:center"><button class="btn btn-secondary btn-sm" onclick="quickAddForMonth('${item.category}','${ym}')" title="${item.name}を${ym}分として入力">＋</button></td>`;
-      }
-    });
-    html += '</tr>';
+function deleteRow_(kind, id) {
+  if (!id) return { ok: false, error: 'IDがありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var r = deleteById_(ss, kind, id);
+    return r;
   });
-  html += '</tbody></table></div>';
-  el.innerHTML = html;
 }
 
-function quickAddForMonth(category, ym) {
-  const date = ym + '-28';
-  const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
-  if (按分Cats.includes(category)) {
-    const item = monthly按分Items.find(i=>i.category===category);
-    showSection('按分', document.querySelectorAll('.main-tab')[5]);
-    if (item) {
-      const dateInput = document.getElementById(`m-${item.key}-date`);
-      if (dateInput) dateInput.value = date;
-      const amountInput = document.getElementById(`m-${item.key}-amount`);
-      if (amountInput) amountInput.focus();
-    }
-  } else {
-    showSection('add', document.querySelectorAll('.main-tab')[1]);
-    document.getElementById('i-date').value = date;
-    document.getElementById('i-cat').value = category;
-    onCatChange();
-    document.getElementById('i-amount').focus();
+function deleteById_(ss, kind, id) {
+  var t = ensureSheet_(ss, kind);
+  var rowNo = findRow_(t, id);
+  if (rowNo < 0) return { ok: true, notFound: true };
+  var before = rowToObj_(t.sheet.getRange(rowNo, 1, 1, t.width).getValues()[0], t.map);
+  var lockErr = checkLocked_(before);
+  if (lockErr) return { ok: false, error: lockErr };
+  t.sheet.deleteRow(rowNo);
+  if (RECEIPT_KINDS[kind] && before.receipt) unlinkReceipt_(ss, before.receipt, id); // 写真は消さずに「未登録」に戻す
+  log_(ss, '削除', SCHEMAS[kind].sheet, id, before, null);
+  return { ok: true };
+}
+
+function findRow_(t, id) {
+  var last = t.sheet.getLastRow();
+  if (last < 2) return -1;
+  var ids = t.sheet.getRange(2, t.map.id, last - 1, 1).getValues();
+  var target = String(id).replace(/\.0$/, '');
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).replace(/\.0$/, '') === target) return i + 2;
   }
-  window.scrollTo(0,0);
+  return -1;
 }
 
-function openChecklistEditor() { document.getElementById('checklist-modal').style.display='flex'; }
-function closeChecklistModal() { document.getElementById('checklist-modal').style.display='none'; }
-
-function addChecklistItem() {
-  const name = document.getElementById('cl-name').value.trim();
-  const icon = document.getElementById('cl-icon').value.trim()||'📌';
-  const category = document.getElementById('cl-cat').value;
-  if (!name) { alert('項目名を入力してください'); return; }
-  if (!按分設定.checklist) 按分設定.checklist = JSON.parse(JSON.stringify(defaultChecklist));
-  按分設定.checklist.push({name, icon, category});
-  localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
-  document.getElementById('cl-name').value='';
-  closeChecklistModal();
-  renderChecklist();
+function sanitize_(kind, obj) {
+  var o = {};
+  SCHEMAS[kind].cols.forEach(function (c) {
+    var key = c[0];
+    if (!obj.hasOwnProperty(key) || key === 'updatedAt') return;
+    var v = obj[key];
+    if (DATE_KEYS[key])        o[key] = normDate_(v);
+    else if (NUMBER_KEYS[key]) o[key] = (v === '' || v === null || v === undefined) ? '' : toNum(v);
+    else if (BOOL_KEYS[key])   o[key] = (v === true || String(v).toUpperCase() === 'TRUE');
+    else                       o[key] = safeText_(v);
+  });
+  if (o.id) o.id = String(o.id);
+  return o;
 }
 
-function removeChecklistItem(idx) {
-  if (!confirm('このチェック項目を削除しますか？（経費データは消えません）')) return;
-  按分設定.checklist.splice(idx,1);
-  localStorage.setItem('keiji_按分', JSON.stringify(按分設定));
-  renderChecklist();
+// 「=」「+」「-」「@」で始まる文字はスプレッドシートが数式と解釈するので、先頭に ' を付けて文字として保存する
+function safeText_(v) {
+  if (v === null || v === undefined) return '';
+  var s = String(v);
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
 }
 
-// ══ 経費入力 ══
-function onCatChange() {
-  const cat = document.getElementById('i-cat').value;
-  document.getElementById('cat-hint').textContent = catHints[cat]||'';
-  const 按分Cats = ['地代家賃_按分','水道光熱費_按分','通信費_按分_net','通信費_按分_phone'];
-  if (按分Cats.includes(cat)) {
-    const r = cat==='地代家賃_按分' ? (按分設定.areaRatio||0) : (按分設定.timeRatio||0);
-    if (r) {
-      document.getElementById('i-ratio').value = [100,80,50,30,20].includes(r) ? String(r) : 'custom';
-      document.getElementById('i-ratio-custom').value = r;
-      document.getElementById('custom-ratio-wrap').style.display = 'block';
-      document.getElementById('ratio-hint').textContent = `家事按分${r}%が自動設定されました（「家事按分」タブで設定した割合）`;
-    } else {
-      document.getElementById('ratio-hint').innerHTML = `按分割合が未設定です。「🏠家事按分」タブで設定してください。`;
-    }
-  } else {
-    document.getElementById('ratio-hint').textContent = '';
-    document.getElementById('custom-ratio-wrap').style.display = 'none';
-  }
-  updateAmountPreview();
+function newId_() {
+  Utilities.sleep(2); // 同じミリ秒のIDが重ならないように
+  return String(new Date().getTime());
 }
 
-function updateAmountPreview() {
-  const amount = parseFloat(document.getElementById('i-amount').value)||0;
-  const ratioSel = document.getElementById('i-ratio').value;
-  if (ratioSel === 'custom') document.getElementById('custom-ratio-wrap').style.display = 'block';
-  const ratio = ratioSel==='custom' ? parseFloat(document.getElementById('i-ratio-custom').value)||100 : parseFloat(ratioSel)||100;
-  const adj = Math.round(amount*ratio/100);
-  const preview = document.getElementById('amount-preview');
-  if (amount > 0) {
-    preview.style.display = 'block';
-    document.getElementById('amount-preview-val').textContent = fmt(adj)+(ratio<100?` （${ratio}%按分）`:'');
-  } else { preview.style.display = 'none'; }
+function now_() { return Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss'); }
+
+// 締めた年（設定の lockedYears）のデータは変更不可
+function checkLocked_(o) {
+  if (!o || !o.date) return '';
+  var years = (readSettings_().lockedYears || []).map(String);
+  var y = String(o.date).slice(0, 4);
+  if (years.indexOf(y) >= 0) return y + '年は「締め」済みのため変更できません。設定画面で締めを解除してから修正してください。';
+  return '';
 }
 
-// ══ 外貨経費（USD汎用・TTMレート自動換算） ══
-async function fetchUSDRateExp() {
-  const dateVal = document.getElementById('fxexp-date').value;
-  if (!dateVal) return;
-  const hint = document.getElementById('fxexp-rate-hint');
-  const rateInput = document.getElementById('fxexp-rate');
-  hint.textContent = '⏳ レートを取得中…';
-  hint.style.color = 'var(--text3)';
-  try {
-    const result = await gasRequest({action:'getUSDRate', date: dateVal});
-    if (result.ok && result.rate) {
-      rateInput.value = result.rate;
-      hint.textContent = `✅ ${dateVal} のTTMレート（GoogleFinance終値）：1USD = ${result.rate}円`;
-      hint.style.color = 'var(--accent)';
-      calcFxExpJPY();
-    } else {
-      hint.textContent = '⚠️ 自動取得できませんでした。手動でレートを入力してください（三菱UFJ等の公表値）';
-      hint.style.color = 'var(--orange)';
-    }
-  } catch(e) {
-    hint.textContent = '⚠️ 取得エラー。手動でレートを入力してください。';
-    hint.style.color = 'var(--red)';
-  }
+// ============================================================
+//  開業費 ⇔ 経費 の移動
+// ============================================================
+// 開業費 → 経費（開業費の行は「移動済み」にして残す）
+function moveKaigyohiToRecord_(id, category, date) {
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var kt = ensureSheet_(ss, 'kaigyohi');
+    var rowNo = findRow_(kt, id);
+    if (rowNo < 0) return { ok: false, error: '開業費が見つかりません' };
+    var range = kt.sheet.getRange(rowNo, 1, 1, kt.width);
+    var row = range.getValues()[0];
+    var k = rowToObj_(row, kt.map);
+    if (k.moved) return { ok: false, error: 'この開業費はすでに経費へ移動済みです' };
+    var usd = extractUsd_(k.note);
+    var pay = k.payment || extractPay_(k.note) || 'クレジットカード';
+    var rec = {
+      id: newId_(), date: date || k.date, category: category || k.category,
+      memo: k.memo, payment: pay, amount: k.amount, ratio: 100, adjusted: k.amount,
+      note: (usd ? usd + ' / ' : '') + '開業費より移動 (ID:' + k.id + ')' + (k.note && !usd ? ' / ' + cleanTags_(k.note) : ''),
+      receipt: k.receipt || ''
+    };
+    var r = appendObj_(ss, 'records', rec);
+    if (!r.ok) return r;
+    row[kt.map.moved - 1] = true;
+    row[kt.map.updatedAt - 1] = now_();
+    range.setValues([row]);
+    log_(ss, '移動(開業費→経費)', '開業費', k.id, k, rec);
+    return { ok: true, newId: r.id };
+  });
 }
 
-function calcFxExpJPY() {
-  const usd = parseFloat(document.getElementById('fxexp-usd').value) || 0;
-  const rate = parseFloat(document.getElementById('fxexp-rate').value) || 0;
-  const jpy = Math.floor(usd * rate);
-  const jpyInput = document.getElementById('fxexp-jpy');
-  const preview = document.getElementById('fxexp-preview');
-  if (usd > 0 && rate > 0) {
-    jpyInput.value = jpy;
-    preview.style.display = 'block';
-    document.getElementById('fxexp-preview-text').innerHTML =
-      `💱 $${usd.toFixed(2)} × ${rate}円 ＝ <span style="font-size:16px;font-family:'DM Mono',monospace;color:var(--accent)">${fmt(jpy)}</span>（取引日のTTMレートで円換算・確定申告用）`;
-  } else {
-    jpyInput.value = '';
-    preview.style.display = 'none';
-  }
-}
-
-async function saveFxExpense() {
-  const date = document.getElementById('fxexp-date').value;
-  const usd = parseFloat(document.getElementById('fxexp-usd').value) || 0;
-  const rate = parseFloat(document.getElementById('fxexp-rate').value) || 0;
-  const jpy = Math.floor(usd * rate);
-  const category = document.getElementById('fxexp-cat').value;
-  const payment = document.getElementById('fxexp-pay').value;
-  const memo = document.getElementById('fxexp-memo').value.trim();
-  const noteExtra = document.getElementById('fxexp-note').value.trim();
-  const editId = document.getElementById('edit-fxexp-id').value;
-
-  if (!date || !usd || !rate || !memo) {
-    alert('取引日・USD金額・TTMレート・内容は必須です。\nレートが自動取得できない場合は手動で入力してください。');
-    return;
-  }
-  const note = `USD: $${usd.toFixed(2)} × TTM: ${rate}円 = ${fmt(jpy)}（${date}時点・取引日換算）${noteExtra ? ' / ' + noteExtra : ''}`;
-  document.getElementById('fxexp-save-btn').disabled = true;
-  showLoading('外貨経費を保存中…');
-
-  if (editId) {
-    const record = {id: editId, date, category, memo, payment, amount: jpy, ratio:100, adjusted: jpy, note};
-    try {
-      const result = await gasRequest({action:'updateRecord', record});
-      if (result.ok) {
-        const idx = records.findIndex(r => String(r.id) === String(editId));
-        if (idx >= 0) records[idx] = record;
-        clearFxExpForm();
-        renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
-        alert(`✅ 更新しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
-      } else { alert('更新に失敗しました: ' + (result.error || '')); }
-    } catch(e) { alert('接続エラー: ' + e.message); }
-    finally { hideLoading(); document.getElementById('fxexp-save-btn').disabled = false; }
-  } else {
-    const record = {id: Date.now(), date, category, memo, payment, amount: jpy, ratio:100, adjusted: jpy, note};
-    try {
-      const result = await gasRequest({action:'addRecord', record});
-      if (result.ok) {
-        records.push(record);
-        clearFxExpForm();
-        renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
-        alert(`✅ 保存しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
-      } else { alert('保存に失敗しました: ' + (result.error || '')); }
-    } catch(e) { alert('接続エラー: ' + e.message); }
-    finally { hideLoading(); document.getElementById('fxexp-save-btn').disabled = false; }
-  }
-}
-
-// 一覧の✏️から外貨経費を編集する際に呼ばれる
-function editFxExpense(id) {
-  const r = records.find(r => String(r.id) === String(id));
-  if (!r) return;
-  document.getElementById('edit-fxexp-id').value = r.id;
-  document.getElementById('fxexp-date').value = r.date;
-  document.getElementById('fxexp-cat').value = r.category;
-  document.getElementById('fxexp-pay').value = r.payment || 'クレジットカード';
-  document.getElementById('fxexp-memo').value = r.memo;
-  const match = r.note && r.note.match(/USD: \$([0-9.]+) × TTM: ([0-9.]+)円/);
-  if (match) {
-    document.getElementById('fxexp-usd').value = match[1];
-    document.getElementById('fxexp-rate').value = match[2];
-    document.getElementById('fxexp-jpy').value = r.amount;
-    const noteClean = r.note.replace(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?/, '').trim();
-    document.getElementById('fxexp-note').value = noteClean;
-    calcFxExpJPY();
-  } else {
-    document.getElementById('fxexp-jpy').value = r.amount;
-    document.getElementById('fxexp-note').value = r.note || '';
-  }
-  document.getElementById('fxexp-save-btn').textContent = '💾 外貨経費を更新';
-  document.getElementById('cancel-fxexp-edit-btn').style.display = 'inline-flex';
-  showSection('add', document.querySelectorAll('.main-tab')[1]);
-  window.scrollTo(0, 0);
-}
-
-function cancelFxExpEdit() { clearFxExpForm(); }
-
-function clearFxExpForm() {
-  const today = new Date().toISOString().split('T')[0];
-  document.getElementById('edit-fxexp-id').value = '';
-  document.getElementById('fxexp-date').value = today;
-  ['fxexp-usd','fxexp-rate','fxexp-jpy','fxexp-memo','fxexp-note'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('fxexp-cat').value = '支払手数料';
-  document.getElementById('fxexp-pay').value = 'クレジットカード';
-  document.getElementById('fxexp-rate-hint').textContent = '取引日を入力するとGoogleFinanceから自動取得';
-  document.getElementById('fxexp-rate-hint').style.color = 'var(--text3)';
-  document.getElementById('fxexp-preview').style.display = 'none';
-  document.getElementById('fxexp-save-btn').textContent = '💾 外貨経費として保存';
-  document.getElementById('cancel-fxexp-edit-btn').style.display = 'none';
-}
-
-async function saveRecord() {
-  const date = document.getElementById('i-date').value;
-  const amount = parseFloat(document.getElementById('i-amount').value)||0;
-  const category = document.getElementById('i-cat').value;
-  const memo = document.getElementById('i-memo').value.trim();
-  const payment = document.getElementById('i-pay').value;
-  const ratioSel = document.getElementById('i-ratio').value;
-  const note = document.getElementById('i-note').value.trim();
-  if (!date||!amount||!category||!memo) { alert('日付・金額・科目・内容は必須です'); return; }
-  const ratio = ratioSel==='custom' ? parseFloat(document.getElementById('i-ratio-custom').value)||100 : parseFloat(ratioSel)||100;
-  const adjusted = Math.round(amount*ratio/100);
-  const editId = document.getElementById('edit-record-id').value;
-
-  if (editId) {
-    // 更新モード
-    const record = {id:editId, date, category, memo, payment, amount, ratio, adjusted, note};
-    document.getElementById('save-btn').disabled = true;
-    showLoading('更新中…');
-    try {
-      const result = await gasRequest({action:'updateRecord', record});
-      if (result.ok) {
-        const idx = records.findIndex(r=>String(r.id)===String(editId));
-        if (idx>=0) records[idx] = record;
-        clearRecordForm(); renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
-        alert('✅ 更新しました！');
-      } else { alert('更新に失敗しました: '+(result.error||'')); }
-    } catch(e){ alert('接続エラー: '+e.message); }
-    finally { hideLoading(); document.getElementById('save-btn').disabled=false; }
-  } else {
-    // 新規追加
-    const record = {id:Date.now(), date, category, memo, payment, amount, ratio, adjusted, note};
-    document.getElementById('save-btn').disabled = true;
-    showLoading('スプレッドシートに保存中…');
-    try {
-      const result = await gasRequest({action:'addRecord', record});
-      if (result.ok) {
-        records.push(record); clearRecordForm(); renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
-        alert('✅ 保存しました！');
-      } else { alert('保存に失敗しました: '+(result.error||'')); }
-    } catch(e){ alert('接続エラー: '+e.message); }
-    finally { hideLoading(); document.getElementById('save-btn').disabled=false; }
-  }
-}
-
-function editRecord(id) {
-  const r = records.find(r=>String(r.id)===String(id));
-  if (!r) return;
-  document.getElementById('edit-record-id').value = r.id;
-  document.getElementById('i-date').value = r.date;
-  document.getElementById('i-amount').value = r.amount;
-  document.getElementById('i-cat').value = r.category;
-  document.getElementById('i-memo').value = r.memo;
-  document.getElementById('i-pay').value = r.payment;
-  document.getElementById('i-note').value = r.note||'';
-  const ratioOpts = ['100','80','50','30','20'];
-  if (ratioOpts.includes(String(r.ratio))) {
-    document.getElementById('i-ratio').value = String(r.ratio);
-    document.getElementById('custom-ratio-wrap').style.display = 'none';
-  } else {
-    document.getElementById('i-ratio').value = 'custom';
-    document.getElementById('i-ratio-custom').value = r.ratio;
-    document.getElementById('custom-ratio-wrap').style.display = 'block';
-  }
-  document.getElementById('add-form-title').textContent = '✏️ 経費を編集する';
-  document.getElementById('save-btn').textContent = '💾 更新する';
-  document.getElementById('cancel-edit-btn').style.display = 'inline-flex';
-  showSection('add', document.querySelector('.main-tab:nth-child(2)'));
-  updateAmountPreview();
-  window.scrollTo(0, 0);
-}
-
-function cancelEdit() {
-  clearRecordForm();
-}
-
-function clearRecordForm() {
-  const today = new Date().toISOString().split('T')[0];
-  document.getElementById('edit-record-id').value = '';
-  document.getElementById('i-date').value = today;
-  ['i-amount','i-memo','i-note','i-ratio-custom'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('i-cat').value = '';
-  document.getElementById('i-pay').value = 'クレジットカード';
-  document.getElementById('i-ratio').value = '100';
-  document.getElementById('custom-ratio-wrap').style.display = 'none';
-  document.getElementById('cat-hint').textContent = '';
-  document.getElementById('ratio-hint').textContent = '';
-  document.getElementById('amount-preview').style.display = 'none';
-  document.getElementById('add-form-title').textContent = '✏️ 経費を入力する';
-  document.getElementById('save-btn').textContent = '💾 スプレッドシートに保存';
-  document.getElementById('cancel-edit-btn').style.display = 'none';
-}
-
-async function deleteRecord(id) {
-  if (!confirm('この経費を削除しますか？')) return;
-  showLoading('削除中…');
-  try {
-    const result = await gasRequest({action:'delRecord', id});
-    if (result.ok) { records=records.filter(r=>String(r.id)!==String(id)); renderList(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
-  } catch(e){ alert('削除に失敗しました'); }
-  finally { hideLoading(); }
-}
-
-// ── 経費 → 開業費へ戻す ──
-async function moveExpenseToKaigyohi(id) {
-  const r = records.find(r=>String(r.id)===String(id));
-  if (!r) return;
-  if (!confirm(`「${r.memo}」（${fmt(r.adjusted)}）を開業費に戻しますか？\n今年の経費からは削除され、開業費リストに移動します。`)) return;
-  showLoading('開業費に戻しています…');
-  try {
-    const result = await gasRequest({action:'moveToKaigyohi', id});
-    if (result.ok) {
-      records = records.filter(rec=>String(rec.id)!==String(id));
-      if (result.restored) {
-        // 元々開業費から移動したものを復元
-        const idx = kaigyohi.findIndex(k=>String(k.id)===String(result.kaigyohiId));
-        if (idx>=0) kaigyohi[idx].moved = false;
-      } else {
-        // 新規に開業費として登録（USD情報・支払方法があれば保持する）
-        const origNote = r.note || '';
-        const usdMatch = origNote.match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
-        const usdPart = usdMatch ? usdMatch[0] : '';
-        const payTag = `[PAY:${r.payment||'クレジットカード'}]`;
-        const newNote = payTag + (usdPart ? (' ' + usdPart) : '') + ' / 経費より移動: ' + r.category;
-        kaigyohi.push({id:String(result.newKaigyohiId), date:r.date, category:'その他開業費', memo:r.memo, amount:r.amount, note:newNote, moved:false});
+// 経費 → 開業費（開業費から来たものなら元の開業費に戻す）
+function moveRecordToKaigyohi_(id) {
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var rt = ensureSheet_(ss, 'records');
+    var rowNo = findRow_(rt, id);
+    if (rowNo < 0) return { ok: false, error: '経費が見つかりません' };
+    var r = rowToObj_(rt.sheet.getRange(rowNo, 1, 1, rt.width).getValues()[0], rt.map);
+    var lockErr = checkLocked_(r);
+    if (lockErr) return { ok: false, error: lockErr };
+    var m = String(r.note || '').match(/\(ID:(\d+)\)/);
+    if (m) {
+      var kt = ensureSheet_(ss, 'kaigyohi');
+      var kRow = findRow_(kt, m[1]);
+      if (kRow > 0) {
+        kt.sheet.getRange(kRow, kt.map.moved).setValue(false);
+        kt.sheet.getRange(kRow, kt.map.updatedAt).setValue(now_());
+        var kObj = rowToObj_(kt.sheet.getRange(kRow, 1, 1, kt.width).getValues()[0], kt.map);
+        var rcpt = r.receipt || kObj.receipt;
+        if (rcpt) { kt.sheet.getRange(kRow, kt.map.receipt).setValue(rcpt); kObj.receipt = rcpt; linkReceipt_(ss, rcpt, 'kaigyohi', kObj); }
+        rt.sheet.deleteRow(rowNo);
+        log_(ss, '移動(経費→開業費・復元)', '経費', r.id, r, { kaigyohiId: m[1] });
+        return { ok: true, restored: true, kaigyohiId: m[1] };
       }
-      renderList(); renderKaigyohi(); renderDashboard(); renderReport(); renderFilterButtons(); setSyncStatus('ok');
-      alert('✅ 開業費に戻しました！');
-    } else { alert('移動に失敗しました: '+(result.error||'')); }
-  } catch(e){ alert('エラー: '+e.message); }
-  finally { hideLoading(); }
-}
-
-// ══ 開業費 ══
-async function saveKaigyohi() {
-  const date = document.getElementById('k-date').value;
-  const amount = parseFloat(document.getElementById('k-amount').value)||0;
-  const memo = document.getElementById('k-memo').value.trim();
-  const category = document.getElementById('k-cat').value;
-  const note = document.getElementById('k-note').value.trim();
-  if (!date||!amount||!memo) { alert('日付・金額・内容は必須です'); return; }
-  const editId = document.getElementById('edit-k-id').value;
-
-  if (editId) {
-    const record = {id:editId, date, category, memo, amount, note};
-    document.getElementById('k-save-btn').disabled=true;
-    showLoading('開業費を更新中…');
-    try {
-      const result = await gasRequest({action:'updateKaigyohi', record});
-      if (result.ok) {
-        const idx=kaigyohi.findIndex(k=>String(k.id)===String(editId));
-        if (idx>=0) kaigyohi[idx]=record;
-        clearKaigyohiForm(); renderKaigyohi(); renderDashboard(); renderReport(); setSyncStatus('ok');
-        alert('✅ 更新しました！');
-      }
-    } catch(e){ alert('エラー: '+e.message); }
-    finally { hideLoading(); document.getElementById('k-save-btn').disabled=false; }
-  } else {
-    const record = {id:Date.now(), date, category, memo, amount, note};
-    document.getElementById('k-save-btn').disabled=true;
-    showLoading('開業費を保存中…');
-    try {
-      const result = await gasRequest({action:'addKaigyohi', record});
-      if (result.ok) {
-        kaigyohi.push(record);
-        clearKaigyohiForm(); renderKaigyohi(); renderDashboard(); renderReport(); setSyncStatus('ok');
-        alert('✅ 開業費として保存しました！');
-      }
-    } catch(e){ alert('エラー: '+e.message); }
-    finally { hideLoading(); document.getElementById('k-save-btn').disabled=false; }
-  }
-}
-
-function editKaigyohi(id) {
-  const k = kaigyohi.find(k=>String(k.id)===String(id));
-  if (!k) return;
-  document.getElementById('edit-k-id').value = k.id;
-  document.getElementById('k-date').value = k.date;
-  document.getElementById('k-amount').value = k.amount;
-  document.getElementById('k-cat').value = k.category;
-  document.getElementById('k-memo').value = k.memo;
-  document.getElementById('k-note').value = k.note||'';
-  document.getElementById('k-form-title').textContent = '🌱 開業費を編集する';
-  document.getElementById('k-save-btn').textContent = '💾 更新する';
-  document.getElementById('cancel-k-edit-btn').style.display = 'inline-flex';
-  window.scrollTo(0, 0);
-}
-
-function cancelKEdit() { clearKaigyohiForm(); }
-
-function clearKaigyohiForm() {
-  const today = new Date().toISOString().split('T')[0];
-  document.getElementById('edit-k-id').value='';
-  document.getElementById('k-date').value=today;
-  ['k-amount','k-memo','k-note'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('k-form-title').textContent='🌱 開業費を入力する';
-  document.getElementById('k-save-btn').textContent='💾 開業費として保存';
-  document.getElementById('cancel-k-edit-btn').style.display='none';
-}
-
-async function deleteKaigyohi(id) {
-  if (!confirm('削除しますか？')) return;
-  showLoading('削除中…');
-  try {
-    const result = await gasRequest({action:'delKaigyohi', id});
-    if (result.ok) { kaigyohi=kaigyohi.filter(k=>String(k.id)!==String(id)); renderKaigyohi(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
-  } catch(e){ alert('削除に失敗しました'); }
-  finally { hideLoading(); }
-}
-
-async function moveKaigyohiToExpense(id) {
-  const k = kaigyohi.find(k=>String(k.id)===String(id));
-  if (!k) return;
-  if (!confirm(`「${k.memo}」（${fmt(k.amount)}）を経費シートに移動しますか？\n開業費として記録しつつ、経費にも追加されます。`)) return;
-  showLoading('経費シートに移動中…');
-  try {
-    const result = await gasRequest({action:'moveToRecord', id});
-    if (result.ok) {
-      // 経費リストにも反映（USD情報・支払方法があれば復元する）
-      const origNote = k.note || '';
-      const usdMatch = origNote.match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
-      const usdPart = usdMatch ? usdMatch[0] : '';
-      const payMatch = origNote.match(/\[PAY:([^\]]+)\]/);
-      const payment = payMatch ? payMatch[1] : 'クレジットカード';
-      const cleanNote = origNote.replace(/\[PAY:[^\]]+\]\s*/, '').trim();
-      const newNote = (usdPart ? usdPart : cleanNote) + ' / 開業費より移動: ' + k.category;
-      const newRec = {id:String(result.newId), date:k.date, category:'開業費→経費', memo:k.memo, payment, amount:k.amount, ratio:100, adjusted:k.amount, note:newNote};
-      records.push(newRec);
-      const idx=kaigyohi.findIndex(ki=>String(ki.id)===String(id));
-      if(idx>=0) kaigyohi[idx].moved=true;
-      renderKaigyohi(); renderDashboard(); renderList(); renderReport(); setSyncStatus('ok');
-      alert('✅ 経費シートに移動しました！');
     }
-  } catch(e){ alert('エラー: '+e.message); }
-  finally { hideLoading(); }
+    // 按分している経費は「按分後の金額」を開業費にする（旧版は全額を移していました）
+    var amount = toNum(r.adjusted) || toNum(r.amount);
+    var usd = extractUsd_(r.note);
+    var ratioNote = (toNum(r.ratio) && toNum(r.ratio) < 100) ? ' 按分: ¥' + toNum(r.amount) + ' × ' + toNum(r.ratio) + '%' : '';
+    var k = {
+      id: newId_(), date: r.date, category: baseAccount_(r.category), memo: r.memo, amount: amount,
+      note: '[PAY:' + (r.payment || 'クレジットカード') + ']' + (usd ? ' ' + usd : '') + ratioNote + ' / 経費より移動: ' + r.category,
+      moved: false, payment: r.payment || '', receipt: r.receipt || ''
+    };
+    var a = appendObj_(ss, 'kaigyohi', k);
+    if (!a.ok) return a;
+    rt.sheet.deleteRow(rowNo);
+    log_(ss, '移動(経費→開業費)', '経費', r.id, r, k);
+    return { ok: true, restored: false, newKaigyohiId: a.id };
+  });
 }
 
-// ══ 外貨売上（USD汎用・TTMレート自動換算） ══
-async function fetchUSDRate() {
-  const dateVal = document.getElementById('etsy-date').value;
-  if (!dateVal) return;
-  const hint = document.getElementById('etsy-rate-hint');
-  const rateInput = document.getElementById('etsy-rate');
-  hint.textContent = '⏳ レートを取得中…';
-  hint.style.color = 'var(--text3)';
-  try {
-    const result = await gasRequest({action:'getUSDRate', date: dateVal});
-    if (result.ok && result.rate) {
-      rateInput.value = result.rate;
-      hint.textContent = `✅ ${dateVal} のTTMレート（GoogleFinance終値）：1USD = ${result.rate}円`;
-      hint.style.color = 'var(--accent)';
-      calcEtsyJPY();
-    } else {
-      hint.textContent = '⚠️ 自動取得できませんでした。手動でレートを入力してください（三菱UFJ等の公表値）';
-      hint.style.color = 'var(--orange)';
-    }
-  } catch(e) {
-    hint.textContent = '⚠️ 取得エラー。手動でレートを入力してください。';
-    hint.style.color = 'var(--red)';
-  }
+// 経費 → 固定資産（10万円以上の買い物を減価償却に回す）
+function recordToAsset_(id, asset) {
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var rt = ensureSheet_(ss, 'records');
+    var rowNo = findRow_(rt, id);
+    if (rowNo < 0) return { ok: false, error: '経費が見つかりません' };
+    var r = rowToObj_(rt.sheet.getRange(rowNo, 1, 1, rt.width).getValues()[0], rt.map);
+    var lockErr = checkLocked_(r);
+    if (lockErr) return { ok: false, error: lockErr };
+    var a = asset || {};
+    a.id = a.id || newId_();
+    a.date = a.date || r.date;
+    a.name = a.name || r.memo;
+    a.cost = a.cost || r.amount;
+    a.payment = a.payment || r.payment;
+    a.receipt = a.receipt || r.receipt || '';
+    a.note = (a.note ? a.note + ' / ' : '') + '経費より移動 (元ID:' + r.id + ')';
+    var res = appendObj_(ss, 'deprec', a);
+    if (!res.ok) return res;
+    rt.sheet.deleteRow(rowNo);
+    log_(ss, '移動(経費→固定資産)', '経費', r.id, r, a);
+    return { ok: true, newId: res.id };
+  });
 }
 
-function calcEtsyJPY() {
-  const usd = parseFloat(document.getElementById('etsy-usd').value) || 0;
-  const rate = parseFloat(document.getElementById('etsy-rate').value) || 0;
-  const jpy = Math.floor(usd * rate);
-  const jpyInput = document.getElementById('etsy-jpy');
-  const preview = document.getElementById('etsy-preview');
-  if (usd > 0 && rate > 0) {
-    jpyInput.value = jpy;
-    preview.style.display = 'block';
-    document.getElementById('etsy-preview-text').innerHTML =
-      `💱 $${usd.toFixed(2)} × ${rate}円 ＝ <span style="font-size:16px;font-family:'DM Mono',monospace;color:var(--accent)">${fmt(jpy)}</span>（TTMレートで円換算・確定申告用）`;
-  } else {
-    jpyInput.value = '';
-    preview.style.display = 'none';
-  }
+function baseAccount_(cat) {
+  var s = String(cat || '');
+  var special = { '地代家賃_駐車場':'地代家賃', '損害保険料_車':'損害保険料', '旅費交通費_車':'旅費交通費', '開業費→経費':'その他開業費' };
+  if (special[s]) return special[s];
+  return s.split('_')[0] || 'その他開業費';
+}
+function extractUsd_(note) {
+  var m = String(note || '').match(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）/);
+  return m ? m[0] : '';
+}
+function extractPay_(note) {
+  var m = String(note || '').match(/\[PAY:([^\]]+)\]/);
+  return m ? m[1] : '';
+}
+function cleanTags_(note) {
+  return String(note || '').replace(/\[PAY:[^\]]+\]\s*/, '').trim();
 }
 
-async function saveEtsyIncome() {
-  const date = document.getElementById('etsy-date').value;
-  const usd = parseFloat(document.getElementById('etsy-usd').value) || 0;
-  const rate = parseFloat(document.getElementById('etsy-rate').value) || 0;
-  const jpy = Math.floor(usd * rate);
-  const source = document.getElementById('etsy-source').value;
-  const payMethod = document.getElementById('etsy-pay').value;
-  const memo = document.getElementById('etsy-memo').value.trim();
-  const noteExtra = document.getElementById('etsy-note').value.trim();
-  const editId = document.getElementById('edit-fx-id').value;
-
-  if (!date || !usd || !rate || !memo) {
-    alert('売上日・USD金額・TTMレート・内容は必須です。\nレートが自動取得できない場合は手動で入力してください。');
-    return;
-  }
-  // メモにUSD・レート・受取方法を記録（税務調査対策）
-  const note = `USD: $${usd.toFixed(2)} × TTM: ${rate}円 = ${fmt(jpy)}（${date}時点）/ 受取方法: ${payMethod}${noteExtra ? ' / ' + noteExtra : ''}`;
-  document.getElementById('etsy-save-btn').disabled = true;
-  showLoading('外貨売上を保存中…');
-
-  if (editId) {
-    // 編集モード
-    const record = {id: editId, date, type: source, memo, amount: jpy, note};
-    try {
-      const result = await gasRequest({action:'updateIncome', record});
-      if (result.ok) {
-        const idx = incomes.findIndex(i => String(i.id) === String(editId));
-        if (idx >= 0) incomes[idx] = record;
-        clearEtsyForm();
-        renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
-        alert(`✅ 更新しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
-      } else { alert('更新に失敗しました: ' + (result.error || '')); }
-    } catch(e) { alert('接続エラー: ' + e.message); }
-    finally { hideLoading(); document.getElementById('etsy-save-btn').disabled = false; }
-  } else {
-    // 新規保存
-    const record = {id: Date.now(), date, type: source, memo, amount: jpy, note};
-    try {
-      const result = await gasRequest({action:'addIncome', record});
-      if (result.ok) {
-        incomes.push(record);
-        clearEtsyForm();
-        renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
-        alert(`✅ 保存しました！\n$${usd.toFixed(2)} → ${fmt(jpy)}（TTM: ${rate}円）`);
-      } else { alert('保存に失敗しました: ' + (result.error || '')); }
-    } catch(e) { alert('接続エラー: ' + e.message); }
-    finally { hideLoading(); document.getElementById('etsy-save-btn').disabled = false; }
-  }
-}
-
-// 外貨売上の編集（リストの✏️ボタンから呼ばれる）
-function editFxIncome(id) {
-  const i = incomes.find(i => String(i.id) === String(id));
-  if (!i) return;
-  // フォームに値を復元
-  document.getElementById('edit-fx-id').value = i.id;
-  document.getElementById('etsy-date').value = i.date;
-  document.getElementById('etsy-memo').value = i.memo;
-  document.getElementById('etsy-source').value = i.type;
-  // メモから受取方法を復元
-  const payMatch = i.note && i.note.match(/受取方法: ([^\s\/]+)/);
-  document.getElementById('etsy-pay').value = payMatch ? payMatch[1] : 'Payoneer';
-  // メモからUSD・レートを復元（"USD: $25.50 × TTM: 152.34円 = ..." の形式）
-  const match = i.note && i.note.match(/USD: \$([0-9.]+) × TTM: ([0-9.]+)円/);
-  if (match) {
-    document.getElementById('etsy-usd').value = match[1];
-    document.getElementById('etsy-rate').value = match[2];
-    document.getElementById('etsy-jpy').value = i.amount;
-    const noteClean = i.note.replace(/USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?\s*(受取方法: [^\s\/]+)?\s*\/?/, '').trim();
-    document.getElementById('etsy-note').value = noteClean;
-    calcEtsyJPY();
-  } else {
-    // メモ形式が違う場合は円換算額だけ入れる
-    document.getElementById('etsy-jpy').value = i.amount;
-    document.getElementById('etsy-note').value = i.note || '';
-  }
-  document.getElementById('etsy-save-btn').textContent = '💾 外貨売上を更新';
-  document.getElementById('cancel-fx-edit-btn').style.display = 'inline-flex';
-  // 収入タブの外貨パネルまでスクロール
-  showSection('income', document.querySelectorAll('.main-tab')[2]);
-  window.scrollTo(0, 0);
-}
-
-function cancelFxEdit() { clearEtsyForm(); }
-
-function clearEtsyForm() {
-  const today = new Date().toISOString().split('T')[0];
-  document.getElementById('edit-fx-id').value = '';
-  document.getElementById('etsy-date').value = today;
-  ['etsy-usd','etsy-rate','etsy-jpy','etsy-memo','etsy-note'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('etsy-source').value = 'Etsy売上';
-  document.getElementById('etsy-pay').value = 'Payoneer';
-  document.getElementById('etsy-rate-hint').textContent = '売上日を入力するとGoogleFinanceから自動取得';
-  document.getElementById('etsy-rate-hint').style.color = 'var(--text3)';
-  document.getElementById('etsy-preview').style.display = 'none';
-  document.getElementById('etsy-save-btn').textContent = '💾 外貨売上として保存';
-  document.getElementById('cancel-fx-edit-btn').style.display = 'none';
-}
-
-// ══ 収入 ══
-async function saveIncome() {
-  const date = document.getElementById('inc-date').value;
-  const amount = parseFloat(document.getElementById('inc-amount').value)||0;
-  const type = document.getElementById('inc-type').value;
-  const memo = document.getElementById('inc-memo').value.trim();
-  const note = document.getElementById('inc-note').value.trim();
-  if (!date||!amount||!memo) { alert('日付・金額・内容は必須です'); return; }
-  const editId = document.getElementById('edit-income-id').value;
-
-  if (editId) {
-    const record = {id:editId, date, type, memo, amount, note};
-    document.getElementById('inc-save-btn').disabled=true;
-    showLoading('収入を更新中…');
-    try {
-      const result = await gasRequest({action:'updateIncome', record});
-      if (result.ok) {
-        const idx=incomes.findIndex(i=>String(i.id)===String(editId));
-        if(idx>=0) incomes[idx]=record;
-        clearIncomeForm(); renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
-        alert('✅ 更新しました！');
+// ============================================================
+//  振替伝票（複数行の仕訳を同じ伝票番号でまとめて保存）
+// ============================================================
+function saveSlip_(slip, lines) {
+  if (!lines || !lines.length) return { ok: false, error: '仕訳の行がありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var t = ensureSheet_(ss, 'journals');
+    var slipNo = slip || ('S' + newId_());
+    // 既存の同じ伝票の行を消してから書き直す（修正時）
+    var removed = [];
+    var last = t.sheet.getLastRow();
+    if (slip && last >= 2) {
+      var vals = t.sheet.getRange(2, 1, last - 1, t.width).getValues();
+      for (var i = vals.length - 1; i >= 0; i--) {
+        var o = rowToObj_(vals[i], t.map);
+        if (String(o.slip) === String(slip)) {
+          var le = checkLocked_(o);
+          if (le) return { ok: false, error: le };
+          removed.push(o);
+          t.sheet.deleteRow(i + 2);
+        }
       }
-    } catch(e){ alert('エラー: '+e.message); }
-    finally { hideLoading(); document.getElementById('inc-save-btn').disabled=false; }
-  } else {
-    const record = {id:Date.now(), date, type, memo, amount, note};
-    document.getElementById('inc-save-btn').disabled=true;
-    showLoading('収入を保存中…');
-    try {
-      const result = await gasRequest({action:'addIncome', record});
-      if (result.ok) {
-        incomes.push(record); clearIncomeForm(); renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok');
-        alert('✅ 保存しました！');
-      }
-    } catch(e){ alert('エラー: '+e.message); }
-    finally { hideLoading(); document.getElementById('inc-save-btn').disabled=false; }
-  }
-}
-
-function editIncome(id) {
-  const i = incomes.find(i=>String(i.id)===String(id));
-  if (!i) return;
-  document.getElementById('edit-income-id').value=i.id;
-  document.getElementById('inc-date').value=i.date;
-  document.getElementById('inc-amount').value=i.amount;
-  document.getElementById('inc-type').value=i.type;
-  document.getElementById('inc-memo').value=i.memo;
-  document.getElementById('inc-note').value=i.note||'';
-  document.getElementById('inc-form-title').textContent='💰 収入を編集する';
-  document.getElementById('inc-save-btn').textContent='💾 更新する';
-  document.getElementById('cancel-inc-edit-btn').style.display='inline-flex';
-  window.scrollTo(0,0);
-}
-
-function cancelIncEdit(){ clearIncomeForm(); }
-
-function clearIncomeForm(){
-  const today=new Date().toISOString().split('T')[0];
-  document.getElementById('edit-income-id').value='';
-  document.getElementById('inc-date').value=today;
-  ['inc-amount','inc-memo','inc-note'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('inc-form-title').textContent='💰 収入・補助金を入力する';
-  document.getElementById('inc-save-btn').textContent='💾 収入として保存';
-  document.getElementById('cancel-inc-edit-btn').style.display='none';
-}
-
-async function deleteIncome(id) {
-  if (!confirm('削除しますか？')) return;
-  showLoading('削除中…');
-  try {
-    const result = await gasRequest({action:'delIncome', id});
-    if (result.ok) { incomes=incomes.filter(i=>String(i.id)!==String(id)); renderIncomes(); renderDashboard(); renderReport(); setSyncStatus('ok'); }
-  } catch(e){ alert('削除に失敗しました'); }
-  finally { hideLoading(); }
-}
-
-// ══ 減価償却 ══
-function calcDeprec() {
-  const cost = parseFloat(document.getElementById('dep-cost').value)||0;
-  const yearsEl = document.getElementById('dep-years');
-  const yearsCustom = document.getElementById('dep-years-custom-wrap');
-  let years;
-  if (yearsEl.value === 'custom') {
-    yearsCustom.style.display='block';
-    years = parseFloat(document.getElementById('dep-years-custom').value)||0;
-  } else {
-    yearsCustom.style.display='none';
-    years = parseFloat(yearsEl.value)||4;
-  }
-  const method = document.getElementById('dep-method').value;
-  const ratio = parseFloat(document.getElementById('dep-ratio').value)||100;
-  const preview = document.getElementById('dep-preview');
-  if (!cost||!years) { preview.style.display='none'; return; }
-  let annual;
-  if (method==='定額法') {
-    annual = Math.round(cost/years * ratio/100);
-  } else {
-    // 定率法（簡易：償却率 = 1-残存価額率 ≈ 1/耐用年数 × 2）
-    const rate = Math.min(2/years, 1);
-    annual = Math.round(cost*rate * ratio/100);
-  }
-  preview.style.display='block';
-  document.getElementById('dep-preview-text').innerHTML =
-    `${method}・耐用${years}年 → 年間償却額 <span style="font-size:16px;font-family:'DM Mono',monospace">${fmt(annual)}</span>（事業割合${ratio}%）<br>
-    <span style="font-size:12px;color:var(--text2)">※ 30万円未満の場合、青色申告の少額減価償却特例で全額一括経費も可能です。</span>`;
-  return annual;
-}
-
-async function saveDeprec() {
-  const date = document.getElementById('dep-date').value;
-  const name = document.getElementById('dep-name').value.trim();
-  const cost = parseFloat(document.getElementById('dep-cost').value)||0;
-  const yearsEl = document.getElementById('dep-years');
-  const years = yearsEl.value==='custom' ? parseFloat(document.getElementById('dep-years-custom').value)||0 : parseFloat(yearsEl.value)||0;
-  const method = document.getElementById('dep-method').value;
-  const ratio = parseFloat(document.getElementById('dep-ratio').value)||100;
-  const note = document.getElementById('dep-note').value.trim();
-  if (!date||!name||!cost||!years) { alert('日付・品名・取得価額・耐用年数は必須です'); return; }
-  let annual;
-  if (method==='定額法') { annual=Math.round(cost/years*ratio/100); }
-  else { const rate=Math.min(2/years,1); annual=Math.round(cost*rate*ratio/100); }
-  const record = {id:Date.now(), date, name, cost, years, method, ratio, annual, note};
-  document.getElementById('dep-save-btn').disabled=true;
-  showLoading('固定資産を登録中…');
-  try {
-    const result = await gasRequest({action:'addDeprec', record});
-    if (result.ok) {
-      deprec.push(record);
-      ['dep-name','dep-cost','dep-note'].forEach(id=>document.getElementById(id).value='');
-      document.getElementById('dep-ratio').value='100';
-      document.getElementById('dep-years').value='4';
-      document.getElementById('dep-preview').style.display='none';
-      renderDeprec(); renderDashboard(); setSyncStatus('ok');
-      alert('✅ 固定資産を登録しました！');
     }
-  } catch(e){ alert('エラー: '+e.message); }
-  finally { hideLoading(); document.getElementById('dep-save-btn').disabled=false; }
+    var saved = [];
+    for (var j = 0; j < lines.length; j++) {
+      var ln = lines[j];
+      ln.slip = slipNo;
+      ln.id = newId_();
+      var r = appendObj_(ss, 'journals', ln);
+      if (!r.ok) return r;
+      saved.push(r.saved);
+    }
+    log_(ss, slip ? '振替伝票修正' : '振替伝票追加', '仕訳帳', slipNo, removed.length ? removed : null, saved);
+    return { ok: true, slip: slipNo, lines: saved };
+  });
 }
 
-async function deleteDeprec(id) {
-  if (!confirm('削除しますか？')) return;
-  showLoading('削除中…');
+function deleteSlip_(slip) {
+  if (!slip) return { ok: false, error: '伝票番号がありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var t = ensureSheet_(ss, 'journals');
+    var last = t.sheet.getLastRow();
+    if (last < 2) return { ok: true };
+    var vals = t.sheet.getRange(2, 1, last - 1, t.width).getValues();
+    var removed = [];
+    for (var i = vals.length - 1; i >= 0; i--) {
+      var o = rowToObj_(vals[i], t.map);
+      if (String(o.slip) === String(slip)) {
+        var le = checkLocked_(o);
+        if (le) return { ok: false, error: le };
+        removed.push(o);
+        t.sheet.deleteRow(i + 2);
+      }
+    }
+    log_(ss, '振替伝票削除', '仕訳帳', slip, removed, null);
+    return { ok: true, removed: removed.length };
+  });
+}
+
+// まとめて追加（定期取引の一括登録など）。items = [{kind:'records'|'incomes'|..., record:{...}}]
+function batchAdd_(items) {
+  if (!items || !items.length) return { ok: false, error: '登録するデータがありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var ids = [];
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!SCHEMAS[it.kind]) return { ok: false, error: '不明な種類: ' + it.kind, savedIds: ids };
+      var r = appendObj_(ss, it.kind, it.record);
+      if (!r.ok) return { ok: false, error: r.error, savedIds: ids };
+      log_(ss, '追加(まとめて)', SCHEMAS[it.kind].sheet, r.id, null, r.saved);
+      ids.push(r.id);
+    }
+    return { ok: true, ids: ids };
+  });
+}
+
+// ============================================================
+//  設定（按分割合・開業日・支払方法の対応など。スマホとPCで共通）
+// ============================================================
+function readSettings_() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sh = ensureKVSheet_(ss, SETTINGS_SHEET, ['キー', '値（JSON）'], '#374151');
+  var last = sh.getLastRow();
+  var s = {};
+  if (last < 2) return s;
+  sh.getRange(2, 1, last - 1, 2).getValues().forEach(function (r) {
+    if (!r[0]) return;
+    try { s[String(r[0])] = JSON.parse(r[1]); } catch (e) { s[String(r[0])] = r[1]; }
+  });
+  return s;
+}
+
+function saveSettings_(partial) {
+  if (!partial) return { ok: false, error: '設定がありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sh = ensureKVSheet_(ss, SETTINGS_SHEET, ['キー', '値（JSON）'], '#374151');
+    var last = sh.getLastRow();
+    var keys = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues().map(function (r) { return String(r[0]); }) : [];
+    var before = readSettings_();
+    for (var k in partial) {
+      var val = JSON.stringify(partial[k]);
+      var idx = keys.indexOf(k);
+      if (idx >= 0) sh.getRange(idx + 2, 2).setValue(val);
+      else { sh.appendRow([k, val]); keys.push(k); }
+    }
+    var changed = {};
+    for (var k2 in partial) changed[k2] = { before: before[k2], after: partial[k2] };
+    log_(ss, '設定変更', SETTINGS_SHEET, Object.keys(partial).join(','), null, changed);
+    return { ok: true, settings: readSettings_() };
+  });
+}
+
+// ============================================================
+//  変更履歴
+// ============================================================
+function log_(ss, op, sheetName, id, before, after) {
   try {
-    const result = await gasRequest({action:'delDeprec', id});
-    if (result.ok) { deprec=deprec.filter(d=>String(d.id)!==String(id)); renderDeprec(); renderDashboard(); setSyncStatus('ok'); }
-  } catch(e){ alert('削除に失敗しました'); }
-  finally { hideLoading(); }
+    var sh = ensureKVSheet_(ss, LOG_SHEET, ['日時', '操作', 'シート', 'ID', '変更前', '変更後'], '#6b7280');
+    sh.appendRow([now_(), op, sheetName, String(id || ''), before ? JSON.stringify(before) : '', after ? JSON.stringify(after) : '']);
+  } catch (e) { /* 履歴の失敗で本処理を止めない */ }
 }
 
-// ══ RENDER ══
-function catDisplay(cat) {
-  const map = {
-    '通信費_AI':'AIサービス','諸会費_デザイン':'デザインツール','諸会費_クラウド':'クラウドツール',
-    '通信費_ドメイン':'ドメイン・サーバー','地代家賃_按分':'家賃（按分）','水道光熱費_按分':'電気代（按分）',
-    '通信費_按分_net':'ネット代（按分）','通信費_按分_phone':'スマホ代（按分）',
-    '旅費交通費_車':'ガソリン代','地代家賃_駐車場':'駐車場代','損害保険料_車':'自動車保険','車両費':'車両費',
+function getLog_(limit) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sh = ensureKVSheet_(ss, LOG_SHEET, ['日時', '操作', 'シート', 'ID', '変更前', '変更後'], '#6b7280');
+  var last = sh.getLastRow();
+  if (last < 2) return { ok: true, log: [] };
+  var n = Math.min(limit || 100, last - 1);
+  var vals = sh.getRange(last - n + 1, 1, n, 6).getValues().reverse();
+  return { ok: true, log: vals.map(function (r) {
+    return { at: (r[0] instanceof Date) ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd HH:mm:ss') : String(r[0]),
+             op: String(r[1]), sheet: String(r[2]), id: String(r[3]), before: String(r[4]), after: String(r[5]) };
+  }) };
+}
+
+// ============================================================
+//  帳簿・決算書をシートに書き出す（「出力_」で始まるシートだけを書き換えます）
+// ============================================================
+function writeReport_(name, rows) {
+  if (!name || String(name).indexOf('出力_') !== 0) return { ok: false, error: '書き出し先のシート名は「出力_」で始めてください' };
+  if (!rows || !rows.length) return { ok: false, error: '書き出すデータがありません' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+    sh.clear();
+    var width = 0;
+    rows.forEach(function (r) { if (r.length > width) width = r.length; });
+    var grid = rows.map(function (r) { var a = r.slice(); while (a.length < width) a.push(''); return a; });
+    sh.getRange(1, 1, grid.length, width).setValues(grid);
+    sh.getRange(1, 1, 1, width).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    log_(ss, '帳簿書き出し', name, '', null, { rows: rows.length });
+    return { ok: true, url: ss.getUrl() + '#gid=' + sh.getSheetId() };
+  });
+}
+
+// ============================================================
+//  バックアップ（スプレッドシートをまるごとコピー）
+// ============================================================
+function backupNow() {
+  var file = DriveApp.getFileById(SPREADSHEET_ID);
+  var folders = DriveApp.getFoldersByName(BACKUP_FOLDER);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(BACKUP_FOLDER);
+  var name = '経費ノート_バックアップ_' + Utilities.formatDate(new Date(), TZ, 'yyyyMMdd_HHmmss');
+  var copy = file.makeCopy(name, folder);
+  try { log_(SpreadsheetApp.openById(SPREADSHEET_ID), 'バックアップ', '', copy.getId(), null, { name: name }); } catch (e) {}
+  return { ok: true, name: name, url: copy.getUrl(), folderUrl: folder.getUrl() };
+}
+
+// 毎週月曜の深夜に自動バックアップ（Apps Script の画面からこの関数を1回実行してください）
+function setupAutoBackup() {
+  var exists = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'autoBackup'; });
+  if (!exists) {
+    ScriptApp.newTrigger('autoBackup').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(3).create();
+  }
+  return { ok: true, message: exists ? '自動バックアップはすでに設定されています' : '毎週月曜 3時台に自動バックアップするよう設定しました' };
+}
+function autoBackup() { backupNow(); }
+
+// 合言葉を作る（任意。Apps Script の画面から1回実行し、ログに出た文字をアプリに入力）
+function setupAppKey() {
+  var key = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+  PropertiesService.getScriptProperties().setProperty('APP_KEY', key);
+  Logger.log('アプリキー: ' + key + '  ← アプリの「設定 → 接続」に入力してください');
+  return key;
+}
+function removeAppKey() { PropertiesService.getScriptProperties().deleteProperty('APP_KEY'); }
+
+// ============================================================
+//  領収書の写真（Googleドライブに保存・文字の読み取り・取引との紐づけ）
+// ============================================================
+// 写真を受け取ってドライブに保存し、文字を読み取って「領収書」シートに記録する
+// receipt = { id, takenAt, thumb, ocr(true/false), note }, image = base64（"data:" なし）, mime = image/jpeg など
+function uploadReceipt_(rc, image, mime) {
+  rc = rc || {};
+  if (!image) return { ok: false, error: '写真のデータがありません' };
+  var id = String(rc.id || ('R' + newId_()));
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var t = ensureSheet_(ss, 'receipts');
+  var exist = findRow_(t, id);
+  if (exist > 0) return { ok: true, duplicate: true, receipt: rowToObj_(t.sheet.getRange(exist, 1, 1, t.width).getValues()[0], t.map) };
+
+  mime = /^image\/(jpeg|png|gif)$/.test(String(mime)) ? String(mime) : 'image/jpeg';
+  var ext = mime === 'image/png' ? '.png' : mime === 'image/gif' ? '.gif' : '.jpg';
+  var takenAt = normDateTime_(rc.takenAt) || now_();
+  var name = '未登録_' + takenAt.replace(/[^0-9]/g, '').slice(0, 14) + '_' + id + ext;
+  var bytes = Utilities.base64Decode(String(image).replace(/^data:[^,]*,/, ''));
+  if (bytes.length > 10 * 1024 * 1024) return { ok: false, error: '写真が大きすぎます（10MBまで）' };
+  var blob = Utilities.newBlob(bytes, mime, name);
+  var file = receiptFolder_(takenAt.slice(0, 4)).createFile(blob);
+
+  var ocr = rc.ocr === false ? { text: '', error: '' } : ocrImage_(blob, id);
+  var obj = {
+    id: id, takenAt: takenAt, fileName: name, url: file.getUrl(), fileId: file.getId(),
+    status: '未登録', linkKind: '', linkId: '', ocrText: String(ocr.text || '').slice(0, 5000),
+    note: rc.note || '', thumb: String(rc.thumb || '').length < 45000 ? String(rc.thumb || '') : ''
   };
-  return map[cat]||cat;
-}
-
-function renderDashboard() {
-  const year = document.getElementById('dashYear').value;
-  const yr = records.filter(r=>String(r.date).startsWith(year));
-  const total = yr.reduce((s,r)=>s+toNum(r.adjusted),0);
-  const kTotal = kaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
-  const incTotal = incomes.filter(i=>String(i.date).startsWith(year)).reduce((s,i)=>s+toNum(i.amount),0);
-  const depTotal = deprec.reduce((s,d)=>s+toNum(d.annual),0);
-  document.getElementById('s-total').textContent=fmt(total);
-  document.getElementById('s-income').textContent=fmt(incTotal);
-  document.getElementById('s-k').textContent=fmt(kTotal);
-  document.getElementById('s-deprec').textContent=fmt(depTotal);
-  const catMap={};
-  yr.forEach(r=>{const k=catDisplay(r.category);catMap[k]=(catMap[k]||0)+toNum(r.adjusted);});
-  const sorted=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
-  const max=sorted[0]?.[1]||1;
-  document.getElementById('breakdown-list').innerHTML=sorted.length===0
-    ?'<p style="color:var(--text3);text-align:center;padding:16px;font-size:13px">データがありません</p>'
-    :sorted.map(([cat,amt])=>`<div class="bkdown-item"><div class="bkdown-name">${cat}</div><div class="bkdown-bar-wrap"><div class="bkdown-bar" style="width:${Math.round(amt/max*100)}%"></div></div><div class="bkdown-amt">${fmt(amt)}</div></div>`).join('');
-  const recent=[...records].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,5);
-  document.getElementById('recent-list').innerHTML=recent.length===0
-    ?'<p style="color:var(--text3);text-align:center;padding:16px;font-size:13px">まだ入力がありません</p>'
-    :recent.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);gap:10px"><div><div style="font-size:13px;font-weight:500">${r.memo}</div><div style="font-size:11px;color:var(--text3)">${r.date} · <span class="badge bg">${catDisplay(r.category)}</span></div></div><div style="font-family:'DM Mono',monospace;font-weight:700;color:var(--red);white-space:nowrap">${fmt(toNum(r.adjusted))}</div></div>`).join('');
-}
-
-function renderFilterButtons() {
-  const cats=[...new Set(records.map(r=>catDisplay(r.category)))].sort();
-  const wrap=document.getElementById('filter-cats');
-  wrap.innerHTML=`<button class="filter-btn ${currentFilterCat==='all'?'active':''}" onclick="filterCat('all',this)">すべて</button>`;
-  cats.forEach(c=>{wrap.innerHTML+=`<button class="filter-btn ${currentFilterCat===c?'active':''}" onclick="filterCat('${c.replace(/'/g,"\\'")}',this)">${c}</button>`;});
-}
-
-function filterCat(cat,btn) {
-  currentFilterCat=cat;
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  renderList();
-}
-
-function renderList() {
-  const year=document.getElementById('f-year').value;
-  const month=document.getElementById('f-month').value;
-  let f=[...records];
-  if (currentFilterCat!=='all') f=f.filter(r=>catDisplay(r.category)===currentFilterCat);
-  if (year) f=f.filter(r=>String(r.date).startsWith(year));
-  if (month) f=f.filter(r=>String(r.date).split('-')[1]===month);
-  f.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const tbody=document.getElementById('records-body');
-  const empty=document.getElementById('l-empty');
-  document.getElementById('l-count').textContent=f.length+'件';
-  document.getElementById('l-total').textContent=f.length?'按分後合計 '+fmt(f.reduce((s,r)=>s+toNum(r.adjusted),0)):'';
-  if (!f.length){tbody.innerHTML='';empty.style.display='block';return;}
-  empty.style.display='none';
-  const pb={'現金':'bgr','クレジットカード':'bb','銀行振込':'bg','電子マネー':'bo','口座引落':'bpu'};
-  tbody.innerHTML=f.map(r=>{
-    const usdMatch = r.note && r.note.match(/USD: \$([0-9.]+)/);
-    const usdDisp = usdMatch ? `<br><span style="font-size:10px;color:#92400e;font-family:'DM Mono',monospace">$${usdMatch[1]}</span>` : '';
-    const editBtn = usdMatch
-      ? `<button class="btn btn-warning btn-sm" onclick="editFxExpense('${r.id}')" style="margin:1px" title="外貨経費を編集">✏️</button>`
-      : `<button class="btn btn-warning btn-sm" onclick="editRecord('${r.id}')" style="margin:1px">✏️</button>`;
-    return `<tr>
-      <td style="white-space:nowrap">${r.date}</td>
-      <td><span class="badge bg">${catDisplay(r.category)}</span></td>
-      <td>${r.memo}</td>
-      <td><span class="badge ${pb[r.payment]||'bgr'}">${r.payment}</span></td>
-      <td class="amount-cell">${fmt(toNum(r.adjusted))}${toNum(r.ratio)<100?`<br><span style="font-size:10px;color:var(--text3)">(${r.ratio}%)</span>`:''}${usdDisp}</td>
-      <td style="white-space:nowrap">
-        ${editBtn}
-        <button class="btn btn-purple btn-sm" onclick="moveExpenseToKaigyohi('${r.id}')" style="margin:1px" title="開業費へ戻す">🌱開業費へ</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.id}')" style="margin:1px">🗑</button>
-      </td>
-    </tr>`;
-  }).join('');
-}
-
-function renderKaigyohi() {
-  const tbody=document.getElementById('k-body');
-  const empty=document.getElementById('k-empty');
-  const sorted=[...kaigyohi].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const total=kaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
-  document.getElementById('k-total-disp').textContent='合計 '+fmt(total);
-  if (!sorted.length){tbody.innerHTML='';empty.style.display='block';return;}
-  empty.style.display='none';
-  tbody.innerHTML=sorted.map(k=>{
-    const usdMatch = k.note && k.note.match(/USD: \$([0-9.]+)/);
-    const usdDisp = usdMatch ? `<br><span style="font-size:10px;color:#92400e;font-family:'DM Mono',monospace">$${usdMatch[1]}</span>` : '';
-    return `<tr ${k.moved?'style="opacity:.5"':''}>
-    <td>${k.date}</td>
-    <td><span class="badge bo">${k.category}</span></td>
-    <td>${k.memo}${k.moved?'<span class="badge bg" style="margin-left:4px">経費済み</span>':''}</td>
-    <td class="amount-cell">${fmt(toNum(k.amount))}${usdDisp}</td>
-    <td style="white-space:nowrap;display:flex;gap:4px;flex-wrap:wrap">
-      ${!k.moved?`<button class="btn btn-primary btn-sm" onclick="moveKaigyohiToExpense('${k.id}')" title="経費シートに移動">→経費</button>`:''}
-      <button class="btn btn-warning btn-sm" onclick="editKaigyohi('${k.id}')">✏️</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteKaigyohi('${k.id}')">🗑</button>
-    </td>
-  </tr>`;
-  }).join('');
-}
-
-function renderIncomes() {
-  const tbody=document.getElementById('inc-body');
-  const empty=document.getElementById('inc-empty');
-  const sorted=[...incomes].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const total=incomes.reduce((s,i)=>s+toNum(i.amount),0);
-  document.getElementById('inc-total-disp').textContent='合計 '+fmt(total);
-  if (!sorted.length){tbody.innerHTML='';empty.style.display='block';return;}
-  empty.style.display='none';
-  const tb={'売上':'bg','補助金':'bb','給付金':'bo','助成金':'bpu','家賃収入':'bg','その他収入':'bgr',
-    'Etsy売上':'bb','翻訳売上':'bb','CG制作売上':'bb','海外フリーランス':'bb','外貨売上':'bb','Etsy売上(USD)':'bb'};
-  const fxTypes=['Etsy売上','翻訳売上','CG制作売上','海外フリーランス','外貨売上','Etsy売上(USD)'];
-  tbody.innerHTML=sorted.map(i=>{
-    const isFx=fxTypes.includes(i.type);
-    const usdMatch=i.note&&i.note.match(/USD: \$([0-9.]+)/);
-    const usdDisp=usdMatch?`<span style="font-size:11px;color:#92400e;font-family:'DM Mono',monospace">$${usdMatch[1]}</span>`:'';
-    const editBtn=isFx
-      ?`<button class="btn btn-warning btn-sm" onclick="editFxIncome('${i.id}')" style="margin-right:4px" title="外貨売上を編集">✏️</button>`
-      :`<button class="btn btn-warning btn-sm" onclick="editIncome('${i.id}')" style="margin-right:4px">✏️</button>`;
-    return `<tr>
-      <td>${i.date}</td>
-      <td><span class="badge ${tb[i.type]||'bgr'}">${i.type}</span></td>
-      <td>${i.memo}</td>
-      <td class="amount-cell">${fmt(toNum(i.amount))}</td>
-      <td class="amount-cell">${usdDisp}</td>
-      <td style="white-space:nowrap">${editBtn}<button class="btn btn-danger btn-sm" onclick="deleteIncome('${i.id}')">🗑</button></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderDeprec() {
-  const tbody=document.getElementById('dep-body');
-  const empty=document.getElementById('dep-empty');
-  const total=deprec.reduce((s,d)=>s+toNum(d.annual),0);
-  document.getElementById('dep-total-disp').textContent='年間償却 '+fmt(total);
-  if (!deprec.length){tbody.innerHTML='';empty.style.display='block';return;}
-  empty.style.display='none';
-  tbody.innerHTML=deprec.map(d=>`<tr>
-    <td>${d.date}</td>
-    <td>${d.name}</td>
-    <td class="amount-cell">${fmt(toNum(d.cost))}</td>
-    <td>${d.years}年（${d.method}）</td>
-    <td class="amount-cell" style="color:var(--purple)">${fmt(toNum(d.annual))}</td>
-    <td><button class="btn btn-danger btn-sm" onclick="deleteDeprec('${d.id}')">🗑</button></td>
-  </tr>`).join('');
-}
-
-function renderReport() {
-  const year=(document.getElementById('r-year')||{value:'2026'}).value;
-  const yr=records.filter(r=>String(r.date).startsWith(year));
-  const incYr=incomes.filter(i=>String(i.date).startsWith(year));
-  const expTotal=yr.reduce((s,r)=>s+toNum(r.adjusted),0);
-  const incTotal=incYr.reduce((s,i)=>s+toNum(i.amount),0);
-  const kTotal=kaigyohi.reduce((s,k)=>s+toNum(k.amount),0);
-  document.getElementById('r-inc-total').textContent=fmt(incTotal);
-  document.getElementById('r-exp-total').textContent=fmt(expTotal);
-  const profit=incTotal-expTotal;
-  const profitEl=document.getElementById('r-profit');
-  profitEl.textContent=fmt(profit);
-  profitEl.style.color=profit>=0?'var(--accent)':'var(--red)';
-  document.getElementById('r-k-total').textContent=fmt(kTotal);
-  const catMap={};
-  yr.forEach(r=>{const k=catDisplay(r.category);catMap[k]=(catMap[k]||0)+toNum(r.adjusted);});
-  const sorted=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
-  document.getElementById('r-by-cat').innerHTML=sorted.length===0
-    ?'<p style="color:var(--text3);text-align:center;padding:16px">データがありません</p>'
-    :`<table style="width:100%"><thead><tr><th>科目</th><th style="text-align:right">按分後合計</th><th style="text-align:right">割合</th></tr></thead><tbody>${sorted.map(([cat,amt])=>`<tr><td>${cat}</td><td class="amount-cell">${fmt(amt)}</td><td class="amount-cell" style="color:var(--text3)">${expTotal?Math.round(amt/expTotal*100):0}%</td></tr>`).join('')}<tr style="font-weight:700;border-top:2px solid var(--border)"><td>合計</td><td class="amount-cell" style="color:var(--red)">${fmt(expTotal)}</td><td></td></tr></tbody></table>`;
-  const incMap={};
-  incYr.forEach(i=>{incMap[i.type]=(incMap[i.type]||0)+toNum(i.amount);});
-  const incSorted=Object.entries(incMap).sort((a,b)=>b[1]-a[1]);
-  document.getElementById('r-by-income').innerHTML=incSorted.length===0
-    ?'<p style="color:var(--text3);text-align:center;padding:16px">収入データがありません</p>'
-    :`<table style="width:100%"><thead><tr><th>種類</th><th style="text-align:right">合計</th></tr></thead><tbody>${incSorted.map(([t,a])=>`<tr><td>${t}</td><td class="amount-cell">${fmt(a)}</td></tr>`).join('')}<tr style="font-weight:700;border-top:2px solid var(--border)"><td>合計</td><td class="amount-cell" style="color:var(--blue)">${fmt(incTotal)}</td></tr></tbody></table>`;
-  const months=Array.from({length:12},(_,i)=>i+1);
-  let rows='';
-  months.forEach(m=>{
-    const key=year+'-'+String(m).padStart(2,'0');
-    const mr=yr.filter(r=>String(r.date).startsWith(key));
-    const ir=incYr.filter(i=>String(i.date).startsWith(key));
-    if (!mr.length&&!ir.length) return;
-    rows+=`<tr><td>${m}月</td><td class="amount-cell">${fmt(mr.reduce((s,r)=>s+toNum(r.adjusted),0))}</td><td class="amount-cell" style="color:var(--blue)">${fmt(ir.reduce((s,i)=>s+toNum(i.amount),0))}</td><td>${mr.length}件</td></tr>`;
+  var res = withLock_(function () {
+    var again = findRow_(t, id);
+    if (again > 0) return { dup: true, row: again };
+    var a = appendObj_(ss, 'receipts', obj);
+    if (a.ok) log_(ss, '領収書の保存', '領収書', id, null, { fileName: name, url: obj.url });
+    return a;
   });
-  document.getElementById('r-monthly').innerHTML=rows||'<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:16px">データなし</td></tr>';
-  const depTotal=deprec.reduce((s,d)=>s+toNum(d.annual),0);
-  document.getElementById('r-k').innerHTML=`
-    ${kTotal>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--orange-light);border-radius:8px;border:1px solid #fcd34d;margin-bottom:8px"><div><strong>開業費合計</strong><br><span style="font-size:12px;color:var(--text3)">${kaigyohi.length}件 ／ 利益が出た年に任意償却できます</span></div><div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:var(--orange)">${fmt(kTotal)}</div></div>`:'<p style="color:var(--text3);font-size:13px;padding:8px 0">開業費の登録がありません</p>'}
-    ${depTotal>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--purple-light);border-radius:8px;border:1px solid #c4b5fd"><div><strong>減価償却（年間）</strong><br><span style="font-size:12px;color:var(--text3)">${deprec.length}件</span></div><div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:var(--purple)">${fmt(depTotal)}</div></div>`:''}`;
-}
-
-function renderGuide() {
-  const el=document.getElementById('guide-cards');
-  if (!el) return;
-  el.innerHTML=guideData.map(g=>`<div class="card" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:22px">${g.icon}</span><div><div style="font-weight:700;font-size:14px">${g.cat}</div><div style="font-size:11px;color:var(--text3)">${g.note}</div></div></div><div style="background:var(--surface2);border-radius:7px;padding:9px 11px;font-size:13px;color:var(--text2)"><strong>例：</strong>${g.ex}</div></div>`).join('');
-}
-
-// ══ NAVIGATION ══
-function showSection(id, btn) {
-  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.main-tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('section-'+id).classList.add('active');
-  if (btn) btn.classList.add('active');
-  if (id==='list'){ renderList(); renderFilterButtons(); }
-  if (id==='report') renderReport();
-  if (id==='kaigyohi') renderKaigyohi();
-  if (id==='income') renderIncomes();
-  if (id==='deprec') renderDeprec();
-  if (id==='dashboard') renderDashboard();
-}
-
-// ══ UTILS ══
-function fmt(n){ return '¥'+Math.round(n||0).toLocaleString('ja-JP'); }
-function toNum(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
-function showLoading(msg){ document.getElementById('loading-msg').textContent=msg||''; document.getElementById('loading').style.display='flex'; }
-function hideLoading(){ document.getElementById('loading').style.display='none'; }
-
-// ══ INIT ══
-(function init(){
-  const savedUrl = localStorage.getItem('keiji_gas_url');
-  if (savedUrl) {
-    GAS_URL = savedUrl;
-    document.getElementById('gas-url-input').value = savedUrl;
-    startApp();
+  if (res.dup) { // 同時に2回送られた場合は、あとから作ったファイルを捨てる
+    try { file.setTrashed(true); } catch (e) {}
+    return { ok: true, duplicate: true, receipt: rowToObj_(t.sheet.getRange(res.row, 1, 1, t.width).getValues()[0], t.map) };
   }
-})();
-</script>
-</body>
-</html>
+  if (!res.ok) { try { file.setTrashed(true); } catch (e) {} return res; }
+  return { ok: true, receipt: obj, ocrError: ocr.error || '' };
+}
+
+// 写真の文字を読み取る（Googleドライブの文字認識。Drive API サービスが必要）
+function ocrImage_(blob, id) {
+  if (typeof Drive === 'undefined' || !Drive.Files) {
+    return { text: '', error: '文字の読み取り機能（Drive API サービス）が追加されていません。写真は保存しました。手順書の「領収書の文字読み取り」を見て追加してください。' };
+  }
+  try {
+    var doc = Drive.Files.create({ name: '_ocr_' + id, mimeType: 'application/vnd.google-apps.document' }, blob, { ocrLanguage: 'ja' });
+    var text = '';
+    try { text = DocumentApp.openById(doc.id).getBody().getText(); }
+    finally { try { DriveApp.getFileById(doc.id).setTrashed(true); } catch (e) {} }
+    text = String(text || '').trim();
+    return { text: text, error: text ? '' : '文字を読み取れませんでした（写真が暗い・ぼやけている・傾いている可能性があります）' };
+  } catch (err) {
+    return { text: '', error: '文字の読み取りに失敗しました：' + (err && err.message ? err.message : err) };
+  }
+}
+
+// 「経費ノート_領収書／2026」のような年ごとのフォルダを返す
+function receiptFolder_(year) {
+  var props = PropertiesService.getScriptProperties();
+  var root = null;
+  var rootId = props.getProperty('RECEIPT_FOLDER_ID');
+  if (rootId) { try { root = DriveApp.getFolderById(rootId); if (root.isTrashed && root.isTrashed()) root = null; } catch (e) { root = null; } }
+  if (!root) {
+    var it = DriveApp.getFoldersByName(RECEIPT_FOLDER);
+    root = it.hasNext() ? it.next() : DriveApp.createFolder(RECEIPT_FOLDER);
+    props.setProperty('RECEIPT_FOLDER_ID', root.getId());
+  }
+  var y = /^\d{4}$/.test(String(year)) ? String(year) : Utilities.formatDate(new Date(), TZ, 'yyyy');
+  var sub = root.getFoldersByName(y);
+  return sub.hasNext() ? sub.next() : root.createFolder(y);
+}
+
+// 取引と写真を紐づけ、ファイル名を「日付_金額円_内容.jpg」に変える（あとで探しやすくするため）
+function linkReceipt_(ss, rid, kind, o) {
+  var t = ensureSheet_(ss, 'receipts');
+  var rowNo = findRow_(t, rid);
+  if (rowNo < 0) return;
+  var range = t.sheet.getRange(rowNo, 1, 1, t.width);
+  var row = range.getValues()[0];
+  var rc = rowToObj_(row, t.map);
+  var amount = kind === 'deprec' ? o.cost : o.amount;
+  var ext = (String(rc.fileName).match(/\.[a-z]+$/i) || ['.jpg'])[0];
+  var name = [o.date || '日付なし', amount !== '' && amount !== undefined ? Math.round(toNum(amount)) + '円' : '', o.memo || o.name || '']
+    .filter(function (x) { return x !== ''; }).join('_').replace(/[\\\/:*?"<>|\r\n\t]/g, ' ').slice(0, 90) + ext;
+  if (rc.fileId && name !== rc.fileName) {
+    try { DriveApp.getFileById(rc.fileId).setName(name); row[t.map.fileName - 1] = name; } catch (e) {}
+  }
+  row[t.map.status - 1] = '登録済';
+  row[t.map.linkKind - 1] = SCHEMAS[kind].sheet;
+  row[t.map.linkId - 1] = String(o.id);
+  row[t.map.updatedAt - 1] = now_();
+  range.setValues([row]);
+}
+
+// 取引から写真を外す（写真は消さずに「未登録」に戻す）
+function unlinkReceipt_(ss, rid, fromId) {
+  var t = ensureSheet_(ss, 'receipts');
+  var rowNo = findRow_(t, rid);
+  if (rowNo < 0) return;
+  var range = t.sheet.getRange(rowNo, 1, 1, t.width);
+  var row = range.getValues()[0];
+  var rc = rowToObj_(row, t.map);
+  if (fromId && rc.linkId && String(rc.linkId) !== String(fromId)) return; // ほかの取引に付け替え済み
+  row[t.map.status - 1] = '未登録';
+  row[t.map.linkKind - 1] = '';
+  row[t.map.linkId - 1] = '';
+  row[t.map.updatedAt - 1] = now_();
+  if (rc.fileId && String(rc.fileName).indexOf('未登録_') !== 0) {
+    try { var nm = '未登録_' + rc.fileName; DriveApp.getFileById(rc.fileId).setName(nm); row[t.map.fileName - 1] = nm; } catch (e) {}
+  }
+  range.setValues([row]);
+}
+
+// アプリで写真を表示するために画像データを返す
+function getReceiptImage_(id) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var t = ensureSheet_(ss, 'receipts');
+  var rowNo = findRow_(t, id);
+  if (rowNo < 0) return { ok: false, error: '領収書が見つかりません' };
+  var rc = rowToObj_(t.sheet.getRange(rowNo, 1, 1, t.width).getValues()[0], t.map);
+  try {
+    var blob = DriveApp.getFileById(rc.fileId).getBlob();
+    return { ok: true, mime: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()), url: rc.url, fileName: rc.fileName };
+  } catch (e) {
+    return { ok: false, error: 'ドライブの写真を開けませんでした（削除された可能性があります）：' + e.message, url: rc.url };
+  }
+}
+
+function updateReceipt_(rc) {
+  if (!rc || !rc.id) return { ok: false, error: 'IDがありません' };
+  return updateRow_('receipts', { id: rc.id, note: rc.note || '' });
+}
+
+// 写真を削除（取引に紐づいているものは削除できない）。ファイルはドライブのゴミ箱へ（30日間は戻せます）
+function deleteReceipt_(id) {
+  return withLock_(function () {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var t = ensureSheet_(ss, 'receipts');
+    var rowNo = findRow_(t, id);
+    if (rowNo < 0) return { ok: true, notFound: true };
+    var rc = rowToObj_(t.sheet.getRange(rowNo, 1, 1, t.width).getValues()[0], t.map);
+    if (rc.status === '登録済') return { ok: false, error: 'この写真は取引に紐づいています。取引の修正画面で写真を「外す」してから削除してください。' };
+    try { DriveApp.getFileById(rc.fileId).setTrashed(true); } catch (e) {}
+    t.sheet.deleteRow(rowNo);
+    rc.thumb = '';
+    log_(ss, '領収書の削除', '領収書', id, rc, null);
+    return { ok: true };
+  });
+}
+
+function normDateTime_(v) {
+  if (!v) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd HH:mm:ss');
+  var m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  return m ? m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] + ':' + (m[6] || '00') : '';
+}
+
+// 【Apps Script の画面から1回実行】領収書フォルダを作り、文字読み取りが使えるか確認する（初回は許可画面が出ます）
+function setupReceipts() {
+  initSheets();
+  var folder = receiptFolder_(Utilities.formatDate(new Date(), TZ, 'yyyy'));
+  var ocrReady = (typeof Drive !== 'undefined' && !!Drive.Files);
+  var msg = '領収書フォルダ：' + folder.getUrl() + '\n文字の読み取り：' + (ocrReady ? '使えます' : '使えません（サービス ＋ → Drive API を追加してください）');
+  Logger.log(msg);
+  return { ok: true, folderUrl: folder.getUrl(), ocr: ocrReady, message: msg };
+}
+
+// ============================================================
+//  USD/JPY レート取得（GOOGLEFINANCE の終値。TTMの近似値）
+// ============================================================
+function getUSDRate(dateStr) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var tmp = ss.getSheetByName('_fx_tmp');
+    if (!tmp) { tmp = ss.insertSheet('_fx_tmp'); tmp.hideSheet(); }
+    var p = String(dateStr).split('-');
+    var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+    var start = new Date(d.getTime() - 7 * 24 * 60 * 60 * 1000); // 土日祝に備えて1週間前から取得
+    var end = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+    var f = function (x) { return x.getFullYear() + ',' + (x.getMonth() + 1) + ',' + x.getDate(); };
+    tmp.getRange('A1').setFormula('=IFERROR(GOOGLEFINANCE("CURRENCY:USDJPY","close",DATE(' + f(start) + '),DATE(' + f(end) + ')),"")');
+    SpreadsheetApp.flush();
+    Utilities.sleep(1500);
+    var vals = tmp.getRange('A1:B12').getValues();
+    tmp.getRange('A1').clearContent();
+    var target = normDate_(dateStr);
+    var rate = 0, rateDate = '';
+    // 取引日当日、なければ直前の営業日の終値を使う
+    for (var i = 1; i < vals.length; i++) {
+      var rd = (vals[i][0] instanceof Date) ? Utilities.formatDate(vals[i][0], TZ, 'yyyy-MM-dd') : '';
+      if (typeof vals[i][1] === 'number' && vals[i][1] > 0 && rd && rd <= target) {
+        rate = vals[i][1];
+        rateDate = rd;
+      }
+    }
+    if (rate > 0) return { ok: true, rate: Math.round(rate * 100) / 100, rateDate: rateDate };
+    return { ok: false, error: 'レートを取得できませんでした' };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
