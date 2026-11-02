@@ -1,0 +1,15 @@
+{
+  "name": "経費ノート",
+  "short_name": "経費ノート",
+  "description": "複式簿記対応の会計アプリ（Googleスプレッドシートに保存）",
+  "start_url": "keiji-kanri-sheets.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f5f4",
+  "theme_color": "#1f5c45",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
