@@ -330,7 +330,7 @@ const Core = (() => {
   ].map(([value,label,account,group,anbun,hint]) => ({ value, label, account, group, anbun, hint }));
   const CAT = Object.fromEntries(CATEGORIES.map(c => [c.value, c]));
 
-  const KAIGYOHI_CATS = ['通信費','消耗品費','広告宣伝費','研修費','旅費交通費','諸会費','支払手数料','接待交際費','地代家賃','新聞図書費','書籍・学習','PC・機器','その他開業費'];
+  const KAIGYOHI_CATS = ['通信費','消耗品費','広告宣伝費','研修費','旅費交通費','諸会費','支払手数料','接待交際費','地代家賃','水道光熱費','新聞図書費','書籍・学習','PC・機器','その他開業費'];
 
   // 収入の種類 → [科目, 標準の所得区分]
   const INCOME_TYPES = [
@@ -964,7 +964,7 @@ if (typeof module !== 'undefined') module.exports = Core;
 // ════════════════════════════════════════════════════════════
 //  経費ノート 画面（基本部分：状態・通信・画面切り替え・ホーム）
 // ════════════════════════════════════════════════════════════
-const APP_VERSION = '3.2.0';
+const APP_VERSION = '3.2.2';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const { fmt, num, toNum, localToday, yearOf, monthOf, normDate, pad2 } = Core;
@@ -1487,7 +1487,14 @@ const Entry = {
     if (this.tab === 'kai') h += `
       <div class="fg"><label>カテゴリ <span class="req">*</span></label><select id="f-kcat">${Core.KAIGYOHI_CATS.map(c => `<option>${esc(c)}</option>`).join('')}</select></div>
       <div class="fg"><label>内容 <span class="req">*</span></label><input type="text" id="f-memo" placeholder="例：Etsyショップ設立手数料／講座受講料" oninput="Entry.update()"></div>
-      <div class="fg"><label>支払方法</label>${methodSelect('f-pay', St.S.payMethods, 'クレジットカード', 'Entry.update()')}</div>`;
+      <div class="fg"><label>支払方法</label>${methodSelect('f-pay', St.S.payMethods, 'クレジットカード', 'Entry.update()')}</div>
+      <div class="fg"><label>家事按分（家賃・電気代・ネット代など）</label><select id="f-kratio" onchange="Entry.update()">
+        <option value="100">按分しない（全額が開業準備用）</option>
+        <option value="area">面積の割合（${Core.areaRatio(St.S) || '未設定'}%）― 家賃など</option>
+        <option value="time">時間の割合（${Core.timeRatio(St.S) || '未設定'}%）― 電気・ネット・スマホ</option>
+        <option value="custom">割合を手入力</option></select>
+        <input type="number" id="f-kratio-custom" min="0" max="100" step="0.1" placeholder="%" oninput="Entry.update()" style="margin-top:6px;display:none">
+        <div class="hint">按分するときは、上の「金額」に<b>請求額の全額</b>を入れてください。仕事で使う割合の分だけが開業費になります。</div></div>`;
     h += `<div class="fg full"><label>メモ（任意）</label><textarea id="f-note" placeholder="${this.tab === 'inc' ? '注文番号・取引先・受取日など' : 'なぜ事業用か・相手先・目的など。税務署に説明するときに役立ちます'}"></textarea></div>`;
     if (this.tab !== 'kai') h += `<div class="fg full"><details class="more" id="f-more"><summary>所得の区分を変える（通常は自動でOK）</summary><div style="margin-top:8px"><select id="f-kubun" onchange="Entry.update()"><option value="">自動（開業日より前＝雑所得、以後＝事業所得、家賃＝不動産所得）</option><option value="事業">事業所得</option><option value="不動産">不動産所得</option><option value="雑">雑所得</option></select></div></details></div>`;
     h += `</div><div class="preview" id="f-preview">金額を入力すると、経費になる金額と仕訳が表示されます。</div>
@@ -1522,7 +1529,18 @@ const Entry = {
         if ($('f-kubun')) $('f-kubun').value = it.kubun || '';
       }
       if (this.tab === 'inc') { $('f-type').value = it.type; ensureOption('f-recv', it.receive); $('f-recv').value = it.receive || '銀行振込'; if ($('f-kubun')) $('f-kubun').value = it.kubun || ''; }
-      if (this.tab === 'kai') { ensureOption('f-kcat', it.category); $('f-kcat').value = it.category; ensureOption('f-pay', it.payment); $('f-pay').value = it.payment || 'クレジットカード'; }
+      if (this.tab === 'kai') {
+        ensureOption('f-kcat', it.category); $('f-kcat').value = it.category; ensureOption('f-pay', it.payment); $('f-pay').value = it.payment || 'クレジットカード';
+        // すでに按分してある開業費は、按分前の金額と割合に戻して表示する
+        const am = String(it.note || '').match(/家事按分: [^¥\/]*¥([\d,]+) × ([\d.]+)%/);
+        if (am && this.cur === 'JPY') {
+          $('f-amount').value = toNum(am[1]);
+          const r = toNum(am[2]);
+          if (r === Core.areaRatio(St.S)) $('f-kratio').value = 'area';
+          else if (r === Core.timeRatio(St.S)) $('f-kratio').value = 'time';
+          else { $('f-kratio').value = 'custom'; $('f-kratio-custom').value = r; }
+        }
+      }
     } else {
       if (p.memo) $('f-memo').value = p.memo;
       if (this.tab === 'exp') {
@@ -1625,6 +1643,18 @@ const Entry = {
     const pay = $('f-pay').value;
     const keepTail = this.item ? (String(this.item.note || '').match(/経費より移動: .*$/) || [''])[0] : '';
     if (keepTail && !note.includes(keepTail)) note = note ? note + ' / ' + keepTail : keepTail;
+    // 家事按分：仕事で使う割合の分だけを開業費にし、計算の根拠をメモに残す
+    const km = $('f-kratio') ? $('f-kratio').value : '100';
+    if ($('f-kratio-custom')) $('f-kratio-custom').style.display = km === 'custom' ? 'block' : 'none';
+    const kr = km === 'area' ? Core.areaRatio(St.S) : km === 'time' ? Core.timeRatio(St.S) : km === 'custom' ? toNum($('f-kratio-custom').value) : 100;
+    if (km !== '100' && kr > 0 && kr < 100) {
+      const a = St.S.anbun || {};
+      const why = km === 'area' ? `面積按分: 仕事スペース${a.areaWork}㎡ ÷ 全体${a.areaTotal}㎡` : km === 'time' ? `時間按分: 1日${a.timeHours}時間÷24時間 × 週${a.timeDays}日÷7日` : '手入力';
+      const usdPart = this.cur === 'USD' ? (note.match(USD_RE) || [''])[0].replace(/\s*\/?\s*$/, '') : '';
+      const rest = usdPart ? note.replace(USD_RE, '').trim() : note;
+      note = (usdPart ? usdPart + ' / ' : '') + `家事按分: ${fmt(amount)} × ${kr}%（${why}）` + (rest ? ' / ' + rest : '');
+      return { id, date, category: $('f-kcat').value, memo, amount: Core.calcAdjusted(amount, kr), note: `[PAY:${pay}] ` + note, payment: pay, _total: amount, _ratio: kr };
+    }
     return { id, date, category: $('f-kcat').value, memo, amount, note: `[PAY:${pay}] ` + note, payment: pay };
   },
 
@@ -1643,6 +1673,8 @@ const Entry = {
     } else if (this.tab === 'inc') h += `収入金額：<span class="big" style="color:var(--blue)">${fmt(o.amount)}</span>`;
     else {
       h += `開業費：<span class="big" style="color:var(--orange)">${fmt(o.amount)}</span>`;
+      if (o._ratio) h += ` <span class="muted">（${fmt(o._total)} × ${o._ratio}%）</span>`;
+      else if ($('f-kratio') && $('f-kratio').value !== '100') h += `<div class="alert warn" style="margin:8px 0 0">⚠️ <div>按分の割合が未設定です。「🏡 家事按分」の画面で面積・時間を入れてください。</div></div>`;
       if (S.openDate && o.date >= S.openDate) h += `<div class="alert warn" style="margin:8px 0 0">⚠️ <div>開業日（${S.openDate}）以降の支出です。開業後の支出は「支出（経費）」で登録してください。</div></div>`;
     }
     // 仕訳のプレビュー
@@ -1690,6 +1722,7 @@ const Entry = {
     const editing = !!this.item;
     const action = { exp: editing ? 'updateRecord' : 'addRecord', inc: editing ? 'updateIncome' : 'addIncome', kai: editing ? 'updateKaigyohi' : 'addKaigyohi' }[this.tab];
     if (this.tab === 'kai' && !editing) o.moved = false;
+    delete o._total; delete o._ratio;
     o.receipt = this.rc ? this.rc.id : (editing ? '' : undefined);
     const offlineMsg = '修正・削除は電波のある場所でお願いします（新しい取引の登録は圏外でもできます）。';
     // 圏外：新しい取引は端末に保存して、あとで自動送信
@@ -2448,9 +2481,9 @@ PAGES.anbun = () => {
     const last = St.DB.records.filter(r => r.category === c).sort((x, y) => y.date.localeCompare(x.date))[0];
     return `<div class="card" style="background:var(--surface2);box-shadow:none;margin-bottom:8px;${c === focus ? 'border-color:var(--primary2);border-width:2px' : ''}"><div class="between"><b>${esc(catLabel(c))}</b><span class="badge">${Core.defaultRatioFor(c, S)}%</span></div>
       <div class="form" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:8px"><div class="fg"><label>日付</label><input type="date" id="abm-d-${i}" value="${c === focus && fdate ? fdate : localToday()}"></div>
-      <div class="fg"><label>請求額（円）</label><input type="number" id="abm-a-${i}" placeholder="${last ? '前回 ' + num(last.amount) + '円' : '金額'}" oninput="$('abm-p-${i}').textContent=this.value?'経費になる額 '+fmt(Core.calcAdjusted(this.value,${Core.defaultRatioFor(c, S)})):''"></div>
+      <div class="fg"><label>請求額（円）</label><input type="number" id="abm-a-${i}" value="${last ? toNum(last.amount) : ''}" placeholder="金額" oninput="$('abm-p-${i}').textContent=this.value?'経費になる額 '+fmt(Core.calcAdjusted(this.value,${Core.defaultRatioFor(c, S)})):''">${last ? `<div class="hint">前回（${esc(last.date)}）と同じ金額を入れています。違うときは書き換えてください。</div>` : ''}</div>
       <div class="fg"><label>支払方法</label>${methodSelect('abm-pay-' + i, S.payMethods, last ? last.payment : 'クレジットカード')}</div></div>
-      <div class="between" style="margin-top:6px"><span class="mono c-green" id="abm-p-${i}"></span><button class="btn sm" onclick="anbunRegister('${attr(c)}',${i})">💾 登録</button></div></div>`;
+      <div class="between" style="margin-top:6px"><span class="mono c-green" id="abm-p-${i}">${last ? '経費になる額 ' + fmt(Core.calcAdjusted(toNum(last.amount), Core.defaultRatioFor(c, S))) : ''}</span><button class="btn sm" onclick="anbunRegister('${attr(c)}',${i})">💾 登録</button></div></div>`;
   }).join('') || '<div class="muted">按分する科目がありません</div>'}</div>`;
   // カスタム按分
   h += `<div class="card"><h3>✨ その他の按分（火災保険など）</h3><div class="form">
@@ -2510,8 +2543,41 @@ async function anbunCustomRegister() {
 const RecF = { ym: '' };
 function recurringDone(t, ym) {
   const tag = `[定期:${t.id}]`;
-  const list = t.kind === 'inc' ? St.DB.incomes : St.DB.records;
+  const list = t.kind === 'inc' ? St.DB.incomes : [...St.DB.records, ...(St.DB.kaigyohi || [])];
   return list.filter(x => String(x.note || '').includes(tag) && x.date.startsWith(ym));
+}
+// ひな形の按分割合と根拠
+function recRatio(t, S) {
+  const m = String(t.ratioMode ?? 'auto'), a = S.anbun || {};
+  const areaWhy = `面積按分: 仕事スペース${a.areaWork}㎡ ÷ 全体${a.areaTotal}㎡`, timeWhy = `時間按分: 1日${a.timeHours}時間÷24時間 × 週${a.timeDays}日÷7日`;
+  if (m === 'area') return { ratio: Core.areaRatio(S) || 0, why: areaWhy };
+  if (m === 'time') return { ratio: Core.timeRatio(S) || 0, why: timeWhy };
+  if (m === 'auto') {
+    const r = Core.defaultRatioFor(t.category, S);
+    if (r === null || r === undefined) return { ratio: 100, why: '' };
+    const k = (S.anbunCats || {})[t.category] ?? (Core.CAT[t.category] && Core.CAT[t.category].anbun);
+    return { ratio: r, why: k === 'area' ? areaWhy : k === 'time' ? timeWhy : '固定割合' };
+  }
+  const r = toNum(m) || 100;
+  return { ratio: r, why: r < 100 ? '固定割合' : '' };
+}
+// 登録先（経費／開業費）。auto は開業日より前なら開業費
+function recDest(t, date, S) {
+  if (t.kind === 'inc') return 'inc';
+  if (t.dest === 'kai') return 'kai';
+  if (t.dest === 'auto') return (!S.openDate || date < S.openDate) ? 'kai' : 'exp';
+  return 'exp';
+}
+function recKaiCat(category) {
+  const base = String(category || '').split('_')[0];
+  return Core.KAIGYOHI_CATS.includes(base) ? base : 'その他開業費';
+}
+function recPreview(i) {
+  const t = (St.S.recurring || [])[i], el = $('rec-p-' + i); if (!t || !el) return;
+  const amount = toNum($('rec-a-' + i).value), date = $('rec-d-' + i).value;
+  if (t.kind === 'inc' || !amount) { el.textContent = ''; return; }
+  const { ratio } = recRatio(t, St.S), dest = recDest(t, date, St.S);
+  el.textContent = `→ ${dest === 'kai' ? '開業費' : '経費'} ${fmt(Core.calcAdjusted(amount, ratio))}` + (ratio < 100 ? `（${ratio}%）` : '');
 }
 PAGES.recurring = () => {
   const S = St.S;
@@ -2522,11 +2588,11 @@ PAGES.recurring = () => {
   if (!T.length) h += `<div class="card">${emptyBox('🔁', 'ひな形がありません。「＋ ひな形を追加」で、毎月の家賃収入やサブスクを登録しておくと、毎月ワンタップで記帳できます。')}</div>`;
   else {
     h += `<div class="card"><h3>📅 <select onchange="RecF.ym=this.value;render()" style="width:auto">${Array.from({ length: 12 }, (_, i) => `${St.year}-${pad2(i + 1)}`).map(ym => `<option ${ym === RecF.ym ? 'selected' : ''} value="${ym}">${+ym.slice(5)}月分</option>`).join('')}</select> をまとめて登録</h3>
-      <div class="tw"><table><thead><tr><th></th><th>内容</th><th>日付</th><th class="n">金額</th><th>状態</th><th></th></tr></thead><tbody>${T.map((t, i) => {
+      <div class="tw"><table><thead><tr><th></th><th>内容</th><th>日付</th><th class="n">金額<div class="muted" style="font-weight:normal">按分するものは請求額の全額</div></th><th>状態</th><th></th></tr></thead><tbody>${T.map((t, i) => {
         const done = recurringDone(t, RecF.ym);
         const day = Math.min(toNum(t.day) || 1, new Date(yearOf(RecF.ym), monthOf(RecF.ym + '-01'), 0).getDate());
-        return `<tr><td><input type="checkbox" class="rec-chk" data-i="${i}" ${done.length || t.active === false ? '' : 'checked'}></td><td><span class="badge ${t.kind === 'inc' ? 'inc' : 'exp'}">${t.kind === 'inc' ? '収入' : '支出'}</span> ${esc(t.name)}<div class="muted">${esc(t.kind === 'inc' ? t.type : catLabel(t.category))}${t.fee ? `・手数料 ${fmt(t.fee)} 差引` : ''}</div></td>
-          <td><input type="date" id="rec-d-${i}" value="${RecF.ym}-${pad2(day)}" style="min-width:140px"></td><td><input type="number" id="rec-a-${i}" value="${t.amount || ''}" style="max-width:120px;text-align:right"></td>
+        return `<tr><td><input type="checkbox" class="rec-chk" data-i="${i}" ${done.length || t.active === false ? '' : 'checked'}></td><td><span class="badge ${t.kind === 'inc' ? 'inc' : 'exp'}">${t.kind === 'inc' ? '収入' : '支出'}</span> ${esc(t.name)}<div class="muted">${esc(t.kind === 'inc' ? t.type : catLabel(t.category))}${t.fee ? `・手数料 ${fmt(t.fee)} 差引` : ''}${t.kind !== 'inc' && recRatio(t, S).ratio < 100 ? `・家事按分 ${recRatio(t, S).ratio}%` : ''}${t.kind !== 'inc' && t.dest === 'kai' ? '・開業費' : t.kind !== 'inc' && t.dest === 'auto' ? '・開業前は開業費' : ''}</div></td>
+          <td><input type="date" id="rec-d-${i}" value="${RecF.ym}-${pad2(day)}" style="min-width:140px" onchange="recPreview(${i})"></td><td class="n"><input type="number" id="rec-a-${i}" value="${t.amount || ''}" style="max-width:120px;text-align:right" oninput="recPreview(${i})"><div class="mono c-green" id="rec-p-${i}" style="font-size:12px;margin-top:2px"></div></td>
           <td>${done.length ? `<span class="badge ok">✅ 登録済み ${fmt(done.reduce((s, x) => s + toNum(x.amount), 0))}</span>` : '<span class="badge">未登録</span>'}</td><td><button class="btn sec sm" onclick="editRecurring(${i})">編集</button></td></tr>`;
       }).join('')}</tbody></table></div>
       <div class="btns"><button class="btn" onclick="registerRecurring()">💾 チェックした分を登録</button></div></div>`;
@@ -2534,9 +2600,10 @@ PAGES.recurring = () => {
   h += `<div class="alert info">💡 <div>家賃収入で管理会社が手数料を差し引いて入金する場合は、ひな形に「差し引かれる手数料」を入れておくと、収入（家賃の総額）と経費（管理手数料）を両方登録します。</div></div>`;
   return h;
 };
+PAGE_AFTER.recurring = () => { (St.S.recurring || []).forEach((_, i) => recPreview(i)); };
 async function registerRecurring() {
   const S = St.S, T = S.recurring || [];
-  const items = [];
+  const items = [], bad = [];
   document.querySelectorAll('.rec-chk').forEach(ch => {
     if (!ch.checked) return;
     const i = +ch.dataset.i, t = T[i];
@@ -2548,10 +2615,18 @@ async function registerRecurring() {
       items.push({ kind: 'incomes', record: { id: base + '1', date, type: t.type || '売上', memo: t.name, amount, receive: t.receive || '銀行振込', kubun: t.kubun || '', note: tag } });
       if (toNum(t.fee)) items.push({ kind: 'records', record: { id: base + '2', date, category: t.feeCategory || (t.kubun === '不動産' || t.type === '家賃収入' ? '管理費' : '支払手数料'), memo: t.name + '（差引手数料）', payment: t.receive || '銀行振込', amount: toNum(t.fee), ratio: 100, adjusted: toNum(t.fee), kubun: t.kubun || '', note: tag } });
     } else {
-      const ratio = t.ratioMode === 'auto' ? (Core.defaultRatioFor(t.category, S) ?? 100) : toNum(t.ratioMode || 100);
-      items.push({ kind: 'records', record: { id: base + '1', date, category: t.category, memo: t.name, payment: t.payment || 'クレジットカード', amount, ratio, adjusted: Core.calcAdjusted(amount, ratio), kubun: t.kubun || '', note: tag + (ratio < 100 ? ` 家事按分: ${fmt(amount)} × ${ratio}%` : '') } });
+      const { ratio, why } = recRatio(t, S);
+      if (!(ratio > 0)) { bad.push(t.name); return; }
+      const anbunNote = ratio < 100 ? ` 家事按分: ${fmt(amount)} × ${ratio}%${why ? '（' + why + '）' : ''}` : '';
+      const pay = t.payment || 'クレジットカード';
+      if (recDest(t, date, S) === 'kai') {
+        items.push({ kind: 'kaigyohi', record: { id: base + '1', date, category: recKaiCat(t.category), memo: t.name, amount: Core.calcAdjusted(amount, ratio), payment: pay, note: `[PAY:${pay}] ` + tag + anbunNote, moved: false } });
+      } else {
+        items.push({ kind: 'records', record: { id: base + '1', date, category: t.category, memo: t.name, payment: pay, amount, ratio, adjusted: Core.calcAdjusted(amount, ratio), kubun: t.kubun || '', note: tag + anbunNote } });
+      }
     }
   });
+  if (bad.length) { alertBox('按分の割合が未設定です', `「${bad.join('」「')}」の割合が0%です。「🏡 家事按分」の画面で面積・時間を入れて保存してください。`); return; }
   if (!items.length) { alertBox('登録するものがありません', 'チェックを入れて、日付と金額を確認してください。'); return; }
   if (items.some(x => isLocked(x.record.date))) { alertBox('締め済みの年です', '設定で締めを解除してから登録してください。'); return; }
   await save('batchAdd', { items }, `✅ ${items.length}件を登録しました`);
@@ -2560,13 +2635,14 @@ function editRecurring(idx) {
   const S = St.S;
   const t = idx === undefined ? { id: 't' + Date.now(), kind: 'exp', name: '', category: '通信費_AI', type: '家賃収入', amount: '', ratioMode: 'auto', payment: 'クレジットカード', receive: '銀行振込', day: 25, kubun: '', fee: '', feeCategory: '' } : JSON.parse(JSON.stringify(S.recurring[idx]));
   window.__recSave = () => {
-    const o = { id: t.id, kind: $('rt-kind').value, name: $('rt-name').value.trim(), category: $('rt-cat').value, type: $('rt-type').value, amount: toNum($('rt-amount').value), ratioMode: $('rt-ratio').value, payment: $('rt-pay').value, receive: $('rt-recv').value, day: toNum($('rt-day').value) || 1, kubun: $('rt-kubun').value, fee: toNum($('rt-fee').value), feeCategory: $('rt-feecat').value };
+    const o = { id: t.id, kind: $('rt-kind').value, name: $('rt-name').value.trim(), category: $('rt-cat').value, type: $('rt-type').value, amount: toNum($('rt-amount').value), ratioMode: $('rt-ratio').value === 'custom' ? String(toNum($('rt-ratio-c').value) || 100) : $('rt-ratio').value, dest: $('rt-dest').value, payment: $('rt-pay').value, receive: $('rt-recv').value, day: toNum($('rt-day').value) || 1, kubun: $('rt-kubun').value, fee: toNum($('rt-fee').value), feeCategory: $('rt-feecat').value };
     if (!o.name) { alert('内容を入れてください'); return; }
     const list = (S.recurring || []).slice();
     if (idx === undefined) list.push(o); else list[idx] = o;
     saveSettings({ recurring: list }, '✅ ひな形を保存しました');
   };
   window.__recDel = () => { const list = (S.recurring || []).slice(); list.splice(idx, 1); saveSettings({ recurring: list }, '🗑 ひな形を削除しました'); };
+  const rm = String(t.ratioMode ?? 'auto'), isCustom = !['auto', 'area', 'time', '100'].includes(rm), autoR = Core.defaultRatioFor(t.category, S);
   window.__recKind = () => { const inc = $('rt-kind').value === 'inc'; document.querySelectorAll('.rt-exp').forEach(e => e.style.display = inc ? 'none' : ''); document.querySelectorAll('.rt-inc').forEach(e => e.style.display = inc ? '' : 'none'); };
   modal(`<h3>${idx === undefined ? 'ひな形を追加' : 'ひな形を編集'}</h3><div class="form">
     <div class="fg"><label>種類</label><select id="rt-kind" onchange="__recKind()"><option value="exp" ${t.kind === 'exp' ? 'selected' : ''}>支出</option><option value="inc" ${t.kind === 'inc' ? 'selected' : ''}>収入</option></select></div>
@@ -2574,7 +2650,19 @@ function editRecurring(idx) {
     <div class="fg full"><label>内容</label><input type="text" id="rt-name" value="${attr(t.name)}" placeholder="例：Claude Pro／〇〇アパート101 家賃"></div>
     <div class="fg"><label>金額（円）</label><input type="number" id="rt-amount" value="${t.amount}"></div>
     <div class="fg rt-exp"><label>勘定科目</label>${categorySelect('rt-cat', t.category)}</div>
-    <div class="fg rt-exp"><label>按分</label><select id="rt-ratio"><option value="auto" ${t.ratioMode === 'auto' ? 'selected' : ''}>科目の設定に従う</option>${['100', '80', '50', '30', '20'].map(v => `<option ${String(t.ratioMode) === v ? 'selected' : ''} value="${v}">${v}%</option>`).join('')}</select></div>
+    <div class="fg rt-exp"><label>家事按分</label><select id="rt-ratio" onchange="$('rt-ratio-c').style.display=this.value==='custom'?'block':'none'">
+      <option value="auto" ${rm === 'auto' ? 'selected' : ''}>科目の設定に従う（今は${autoR ?? 100}%）</option>
+      <option value="area" ${rm === 'area' ? 'selected' : ''}>面積の割合（${Core.areaRatio(S) || '未設定'}%）― 家賃など</option>
+      <option value="time" ${rm === 'time' ? 'selected' : ''}>時間の割合（${Core.timeRatio(S) || '未設定'}%）― 電気・ネット・スマホ</option>
+      <option value="100" ${rm === '100' ? 'selected' : ''}>按分しない（100%仕事用）</option>
+      <option value="custom" ${isCustom ? 'selected' : ''}>割合を手入力</option></select>
+      <input type="number" id="rt-ratio-c" min="0" max="100" step="0.1" placeholder="%" value="${isCustom ? rm : ''}" style="margin-top:6px;${isCustom ? '' : 'display:none'}">
+      <div class="hint">按分するときは「金額」に請求額の全額を入れます。</div></div>
+    <div class="fg rt-exp"><label>登録先</label><select id="rt-dest">
+      <option value="exp" ${!t.dest || t.dest === 'exp' ? 'selected' : ''}>経費</option>
+      <option value="kai" ${t.dest === 'kai' ? 'selected' : ''}>開業費</option>
+      <option value="auto" ${t.dest === 'auto' ? 'selected' : ''}>開業日より前は開業費、開業後は経費</option></select>
+      <div class="hint">開業前の家賃などを開業費にする場合に選びます（扱いは税務署で確認を）。</div></div>
     <div class="fg rt-exp"><label>支払方法</label>${methodSelect('rt-pay', S.payMethods, t.payment)}</div>
     <div class="fg rt-inc"><label>収入の種類</label><select id="rt-type">${Core.INCOME_TYPES.map(x => `<option value="${x.value}" ${x.value === t.type ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select></div>
     <div class="fg rt-inc"><label>入金先</label>${methodSelect('rt-recv', S.receiveMethods, t.receive)}</div>
