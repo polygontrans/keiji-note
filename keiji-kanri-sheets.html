@@ -833,7 +833,10 @@ const Core = (() => {
   // ── レシートの文字から 日付・合計金額・店名・登録番号 を読み取る ─────────
   // OCRの文字は崩れていることがあるので「候補」として使い、保存の前に人が確認する前提
   function toHalfWidth(t) {
-    return String(t || '')
+    // PDFから取り出した文字は「⽀」「⼈」など見た目が同じ別の文字（康熙部首）になることがあるので、NFKCで普通の漢字にそろえる
+    let s = String(t || '');
+    try { s = s.normalize('NFKC'); } catch (e) {}
+    return s
       .replace(/[０-９Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
       .replace(/[￥]/g, '¥').replace(/[，、](?=\s?\d{3})/g, ',').replace(/[．]/g, '.').replace(/[／]/g, '/')
       .replace(/[：]/g, ':').replace(/[－ー―−‐](?=\d)/g, '-').replace(/[（]/g, '(').replace(/[）]/g, ')')
@@ -863,9 +866,14 @@ const Core = (() => {
     // 「発行日」「開催日」などは後回し。それ以外は文中で最初に出てくるもの
     const lineOf = idx => { const st = t.lastIndexOf('\n', idx) + 1; const en = t.indexOf('\n', idx); return t.slice(st, en < 0 ? t.length : en); };
     const before = idx => { const st = Math.max(t.lastIndexOf('\n', idx) + 1, idx - 12); return t.slice(st, idx); };
+    const after = idx => t.slice(idx, Math.min(t.length, idx + 22));
     const score = f => {
-      const near = before(f.idx), line = lineOf(f.idx);
+      const near = before(f.idx), line = lineOf(f.idx), aft = after(f.idx);
       if (/(決済|支払|お支払|ご利用|利用|購入|取引|売上|領収|お買上|注文|ご注文)日?(時)?\s*[:：]?\s*$/.test(near)) return 3;
+      // 「2025年1月31日 . 支払い」のように、日付のすぐ後ろに「支払」がある
+      if (/^[^\n]{6,14}?[ \t]*[.・|]?[ \t]*(お?支払|決済|ご利用|購入)/.test(aft)) return 3;
+      // 「2026/06/09 12:45 PayPal: 取引履歴」のような、画面を印刷・保存した日時は使わない
+      if (/^[^\n]{8,12}\s+\d{1,2}:\d{2}/.test(aft) && /履歴|明細|印刷|print|PayPal|Amazon|ページ|https?:/i.test(line)) return 0;
       if (/(発行|開催|有効|期限|配送|お届け|出荷|印刷)/.test(near) || /有効期限|期限/.test(line)) return 0;
       return 1;
     };
@@ -906,15 +914,24 @@ const Core = (() => {
     lines.forEach(line => { const c = line.replace(/\s+/g, ''); if (AMOUNT_EXCLUDE.test(c)) return; numbersIn(c).filter(n => n.cur).forEach(n => cands.push(n.v)); });
     return cands.length ? Math.max(...cands) : 0;
   }
-  const STORE_SKIP = /領収|レシート|receipt|いらっしゃいませ|ありがと|毎度|またの|ご来店|お買い|様$|^No\.?|登録番号|^T\d|〒|TEL|Tel|電話|FAX|http|www\.|@|^\d|\d{2,4}-\d{2,4}-\d{3,4}|年.*月.*日|\d{1,2}:\d{2}|合計|小計|¥|円|担当|レジ|責|店舗|伝票|取引|注文|番号|創業|創立|since|軽減|税率|対象/i;
+  const STORE_SKIP = /支払方法|お?支払い?$|情報$|方法$|明細|履歴|内容$|詳細|Your Bank|クレジットカ|領収|レシート|receipt|いらっしゃいませ|ありがと|毎度|またの|ご来店|お買い|様$|^No\.?|登録番号|^T\d|〒|TEL|Tel|電話|FAX|http|www\.|@|^\d|\d{2,4}-\d{2,4}-\d{3,4}|年.*月.*日|\d{1,2}:\d{2}|合計|小計|¥|円|担当|レジ|責|店舗|伝票|取引|注文|番号|創業|創立|since|軽減|税率|対象/i;
   const mostlySymbols = l => { const letters = (l.match(/[A-Za-zぁ-んァ-ヶ一-龯々]/g) || []).length; return letters < 2 || letters / l.replace(/\s/g, '').length < 0.5; };
   function parseReceiptStore(text) {
     const all = toHalfWidth(text).split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const clean = v => v.replace(/\s*[印㊞]$/, '').replace(/^[\s*★☆■◆●・\-=:：]+|[\s*★☆■◆●・\-=]+$/g, '').trim();
     // 「販売者」「店舗名」などの見出しがあれば、その後ろ（または次の行）を使う
-    const LABEL = /^(販売者|販売元|店舗名|加盟店名?|ご利用店舗|お店|事業者名?|主催者|発行者|発行元)\s*[:：]?\s*(.*)$/;
+    const LABEL = /^(販売者|販売元|販売店|店舗名|加盟店名?|ご利用店舗|お店|事業者名?|主催者|発行者|発行元|売り?手(?:の情報)?|売主|出品者|請求元|支払先|Seller|Merchant)\s*[:：]?\s*(.*)$/i;
     const labelled = [];
     all.forEach((l, i) => { const m = l.match(LABEL); if (!m) return; const v = m[2] || all[i + 1] || ''; if (v && !STORE_SKIP.test(v) && !mostlySymbols(v) && v.length <= 40) labelled.push({ v: clean(v), pri: /^販売|店舗|加盟店|ご利用店舗|お店|事業者/.test(m[1]) ? 2 : 1 }); });
+    // 「一般社団法人〇〇」「〇〇株式会社」などの法人名は、行の途中にあっても取り出す
+    const CORP = /((?:一般|公益)?(?:社団|財団)法人\s?[^\s(（¥\-−]+|(?:特定非営利活動法人|NPO法人|学校法人|医療法人|社会福祉法人|宗教法人)\s?[^\s(（¥\-−]+|(?:株式会社|有限会社|合同会社)\s?[^\s(（¥\-−]+|[^\s(（¥\-−]+?\s?(?:株式会社|有限会社|合同会社))/;
+    const corpTok = all.map(l => (l.match(CORP) || [])[1]).find(v => v && v.length >= 4 && v.length <= 40 && !/登録番号|御中|様/.test(v));
+    const strong = labelled.filter(x => x.pri === 2);
+    if (strong.length) return strong[0].v;
+    if (corpTok && !labelled.some(x => x.v.includes(corpTok))) {
+      const inLabel = labelled.find(x => CORP.test(x.v));
+      return inLabel ? inLabel.v : corpTok;
+    }
     if (labelled.length) return labelled.sort((a, b) => b.pri - a.pri)[0].v;
     const lines = all.slice(0, 12);
     const corp = all.find(l => /株式会社|有限会社|合同会社|\(株\)|㈱/.test(l) && l.length <= 40 && !/登録番号|TEL|〒|御中|様/.test(l));
@@ -964,7 +981,7 @@ if (typeof module !== 'undefined') module.exports = Core;
 // ════════════════════════════════════════════════════════════
 //  経費ノート 画面（基本部分：状態・通信・画面切り替え・ホーム）
 // ════════════════════════════════════════════════════════════
-const APP_VERSION = '3.2.2';
+const APP_VERSION = '3.2.5';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const { fmt, num, toNum, localToday, yearOf, monthOf, normDate, pad2 } = Core;
@@ -1245,7 +1262,10 @@ function renderNav() {
 function yearsAvailable() {
   const ys = new Set([new Date().getFullYear(), new Date().getFullYear() + 1, 2024]);
   ['records', 'incomes', 'kaigyohi', 'deprec', 'journals'].forEach(k => (St.DB[k] || []).forEach(x => { const y = yearOf(x.date); if (y > 2000) ys.add(y); }));
-  return [...ys].sort();
+  // 途中の年（データがまだない年）も抜けないように、最初の年から最後の年まですべて並べる
+  const lo = Math.min(...ys), hi = Math.max(...ys), out = [];
+  for (let y = lo; y <= hi; y++) out.push(y);
+  return out;
 }
 function renderYearSelect() {
   const sel = $('year-select'); if (!sel) return;
@@ -1343,7 +1363,7 @@ function pageHome() {
   const recent = [
     ...D.records.map(r => ({ k: 'records', d: r.date, t: catLabel(r.category), m: r.memo, a: r.adjusted === '' ? r.amount : r.adjusted, c: 'c-red', b: '<span class="badge exp">支出</span>', id: r.id })),
     ...D.incomes.map(i => ({ k: 'incomes', d: i.date, t: i.type, m: i.memo, a: i.amount, c: 'c-blue', b: '<span class="badge inc">収入</span>', id: i.id })),
-    ...D.kaigyohi.map(k => ({ k: 'kaigyohi', d: k.date, t: k.category, m: k.memo, a: k.amount, c: 'c-orange', b: '<span class="badge kai">開業費</span>', id: k.id })),
+    ...D.kaigyohi.map(k => ({ k: 'kaigyohi', d: k.date, t: catLabel(k.category), m: k.memo, a: k.amount, c: 'c-orange', b: '<span class="badge kai">開業費</span>', id: k.id })),
   ].sort((a, b) => String(b.id).localeCompare(String(a.id))).slice(0, 8);
   html += `<div class="card"><h3>🕐 最近登録したもの <button class="btn sec sm" onclick="App.go('list')">すべて見る</button></h3>${recent.length ? recent.map(x => `
     <div class="list-item" onclick="App.go('entry',{edit:{kind:'${x.k}',id:'${x.id}'}})">${x.b}<div class="main-t"><div class="t1">${esc(x.m)}</div><div class="t2">${x.d}・${esc(x.t)}</div></div><div class="amt ${x.c}">${fmt(x.a)}</div></div>`).join('') : emptyBox('📝', 'まだ登録がありません')}</div>`;
@@ -1426,7 +1446,7 @@ function methodSelect(id, list, selected, onchange) {
 const USD_RE = /USD: \$[0-9.]+ × TTM: [0-9.]+円 = ¥[0-9,]+（[^）]+）\s*\/?\s*/;
 function cleanNote(note) {
   return String(note || '').replace(USD_RE, '').replace(/受取方法: [^\s\/]+\s*\/?\s*/, '').replace(/\[PAY:[^\]]+\]\s*\/?\s*/, '')
-    .replace(/家事按分: [^\/（]*(（[^）]*）)?\s*\/?\s*/, '').replace(/^\s*\/\s*/, '').trim();
+    .replace(/(家事)?按分: [^\/（]*(（[^）]*）)?\s*\/?\s*/, '').replace(/^\s*\/\s*/, '').trim();
 }
 
 const Entry = {
@@ -1485,7 +1505,7 @@ const Entry = {
       <div class="fg"><label>内容・摘要 <span class="req">*</span></label><input type="text" id="f-memo" placeholder="例：スタンプ販売3点／〇〇様 CG制作費" oninput="Entry.update()"></div>
       <div class="fg"><label>受取方法・入金先</label>${methodSelect('f-recv', St.S.receiveMethods, '銀行振込', 'Entry.update()')}<div class="hint" id="f-recv-hint"></div></div>`;
     if (this.tab === 'kai') h += `
-      <div class="fg"><label>カテゴリ <span class="req">*</span></label><select id="f-kcat">${Core.KAIGYOHI_CATS.map(c => `<option>${esc(c)}</option>`).join('')}</select></div>
+      <div class="fg"><label>勘定科目 <span class="req">*</span></label>${categorySelect('f-kcat', '', 'Entry.onKCat()')}<div class="hint">支出（経費）と同じ科目です。開業費は決算書ではまとめて「開業費」になり、ここで選んだ科目は内訳として残ります。</div></div>
       <div class="fg"><label>内容 <span class="req">*</span></label><input type="text" id="f-memo" placeholder="例：Etsyショップ設立手数料／講座受講料" oninput="Entry.update()"></div>
       <div class="fg"><label>支払方法</label>${methodSelect('f-pay', St.S.payMethods, 'クレジットカード', 'Entry.update()')}</div>
       <div class="fg"><label>家事按分（家賃・電気代・ネット代など）</label><select id="f-kratio" onchange="Entry.update()">
@@ -1530,9 +1550,12 @@ const Entry = {
       }
       if (this.tab === 'inc') { $('f-type').value = it.type; ensureOption('f-recv', it.receive); $('f-recv').value = it.receive || '銀行振込'; if ($('f-kubun')) $('f-kubun').value = it.kubun || ''; }
       if (this.tab === 'kai') {
-        ensureOption('f-kcat', it.category); $('f-kcat').value = it.category; ensureOption('f-pay', it.payment); $('f-pay').value = it.payment || 'クレジットカード';
+        if (!Core.CAT[it.category]) ensureOption('f-kcat', it.category, it.category + '（以前の科目）'); $('f-kcat').value = it.category; ensureOption('f-pay', it.payment); $('f-pay').value = it.payment || 'クレジットカード';
         // すでに按分してある開業費は、按分前の金額と割合に戻して表示する
-        const am = String(it.note || '').match(/家事按分: [^¥\/]*¥([\d,]+) × ([\d.]+)%/);
+        const am = String(it.note || '').match(/(?:家事)?按分: [^¥\/]*¥([\d,]+) × ([\d.]+)%/);
+        // 経費から移動したものは、元の科目（例：家賃（按分））を選んでおく
+        const mv = String(it.note || '').match(/経費より移動: ([^\s\/]+)/);
+        if (mv && Core.CAT[mv[1]] && Core.accountOf(mv[1]) === Core.accountOf(it.category)) $('f-kcat').value = mv[1];
         if (am && this.cur === 'JPY') {
           $('f-amount').value = toNum(am[1]);
           const r = toNum(am[2]);
@@ -1577,6 +1600,17 @@ const Entry = {
     } catch (e) { hint.textContent = '⚠️ ' + e.message; }
   },
 
+  // 開業費：按分する科目（家賃（按分）など）を選んだら、按分の割合も自動で選ぶ
+  onKCat() {
+    const c = Core.CAT[$('f-kcat').value], sel = $('f-kratio');
+    if (sel) {
+      const k = c && ((St.S.anbunCats || {})[c.value] ?? c.anbun);
+      if (k === 'area' || k === 'time') sel.value = k;
+      else if (k && !isNaN(+k)) { sel.value = 'custom'; $('f-kratio-custom').value = k; }
+      else sel.value = '100';
+    }
+    this.update();
+  },
   onCat(initial) {
     const cat = $('f-cat').value;
     const c = Core.CAT[cat];
@@ -1700,7 +1734,7 @@ const Entry = {
     if (!o.date) return '日付を入力してください';
     if (!o.amount || o.amount <= 0) return '金額を入力してください';
     if (!o.memo) return '内容・摘要を入力してください';
-    if (this.tab === 'exp' && !o.category) return '勘定科目を選んでください';
+    if ((this.tab === 'exp' || this.tab === 'kai') && !o.category) return '勘定科目を選んでください';
     if (this.cur === 'USD' && !toNum($('f-rate').value)) return '為替レートを入力してください';
     if (isLocked(o.date) || (this.item && isLocked(this.item.date))) return `${yearOf(o.date)}年は締め済みです。設定で締めを解除してください。`;
     return '';
@@ -1778,9 +1812,9 @@ const Entry = {
     App.go('assets', { edit: 'new', preset: { name: it.memo, date: it.date, cost: it.amount, payment: it.payment, note: cleanNote(it.note), fromRecord: it.id } });
   },
 };
-function ensureOption(id, value) {
+function ensureOption(id, value, label) {
   const sel = $(id); if (!sel || !value) return;
-  if (![...sel.options].some(o => o.value === value)) { const op = document.createElement('option'); op.value = value; op.textContent = value; sel.appendChild(op); }
+  if (![...sel.options].some(o => o.value === value)) { const op = document.createElement('option'); op.value = value; op.textContent = label || value; sel.appendChild(op); }
 }
 
 PAGES.entry = () => { if (Entry._params !== St.params) { Entry._params = St.params; Entry.init(St.params); } return Entry.html(); };
@@ -2156,6 +2190,15 @@ Object.assign(Entry, {
         toast(`💡 前回の「${sug.memo}」と同じ科目にしました`);
       }
     }
+    if (this.tab === 'kai' && p.store) {
+      // 開業費も経費と同じ科目なので、過去の経費・開業費から科目を提案する
+      const hist = [...St.DB.records, ...St.DB.kaigyohi.filter(k => Core.CAT[k.category])];
+      const sug = Core.suggestFromHistory(p.store, hist);
+      if (sug && sug.category && Core.CAT[sug.category] && (force || !t['f-kcat'])) {
+        $('f-kcat').value = sug.category; this.onKCat();
+        toast(`💡 前回の「${sug.memo}」と同じ科目にしました`);
+      }
+    }
     if (p.invoiceNo) { const n = $('f-note'); if (n && !n.value.includes(p.invoiceNo)) n.value = (n.value ? n.value + ' / ' : '') + '登録番号 ' + p.invoiceNo; }
     this.update();
   },
@@ -2245,16 +2288,16 @@ PAGE_AFTER.receipts = async () => {
 // ════════════════════════════════════════════════════════════
 
 // ── 取引一覧 ─────────────────────────────────
-const ListF = { type: 'all', month: '', cat: '', q: '', kai: true };
+const ListF = { type: 'all', month: '', cat: '', q: '', kai: true, allYears: false };
 function listRows() {
   const S = St.S, Y = St.year;
   const rows = [];
   if (ListF.type === 'all' || ListF.type === 'exp') St.DB.records.forEach(r => rows.push({ rc: r.receipt, kind: 'records', cls: 'exp', label: '支出', id: r.id, date: r.date, cat: catLabel(r.category), catKey: r.category, memo: r.memo, method: r.payment, amount: r.adjusted === '' ? r.amount : toNum(r.adjusted), sub: (r.adjusted !== '' && toNum(r.adjusted) !== r.amount) ? `${fmt(r.amount)} × ${r.ratio}%` : '', kubun: Core.kubunOfRecord(r, S), note: r.note, sign: -1 }));
   if (ListF.type === 'all' || ListF.type === 'inc') St.DB.incomes.forEach(i => rows.push({ rc: i.receipt, kind: 'incomes', cls: 'inc', label: '収入', id: i.id, date: i.date, cat: i.type, catKey: i.type, memo: i.memo, method: i.receive, amount: i.amount, sub: Core.extractUsd(i.note) ? '$' + Core.extractUsd(i.note).usd : '', kubun: Core.kubunOfRecord(i, S), note: i.note, sign: 1 }));
-  if ((ListF.type === 'all' && ListF.kai) || ListF.type === 'kai') St.DB.kaigyohi.forEach(k => rows.push({ rc: k.receipt, kind: 'kaigyohi', cls: 'kai', label: '開業費', id: k.id, date: k.date, cat: k.category, catKey: k.category, memo: k.memo, method: k.payment, amount: k.amount, sub: k.moved ? '経費へ移動済み' : '', kubun: '開業費', note: k.note, dim: k.moved, sign: 0 }));
+  if ((ListF.type === 'all' && ListF.kai) || ListF.type === 'kai') St.DB.kaigyohi.forEach(k => rows.push({ rc: k.receipt, kind: 'kaigyohi', cls: 'kai', label: '開業費', id: k.id, date: k.date, cat: catLabel(k.category), catKey: k.category, memo: k.memo, method: k.payment, amount: k.amount, sub: k.moved ? '経費へ移動済み' : '', kubun: '開業費', note: k.note, dim: k.moved, sign: 0 }));
   const q = ListF.q.trim().toLowerCase();
-  return rows.filter(r => yearOf(r.date) === Y)
-    .filter(r => !ListF.month || r.date.slice(5, 7) === ListF.month)
+  return rows.filter(r => ListF.allYears || yearOf(r.date) === Y)
+    .filter(r => ListF.allYears || !ListF.month || r.date.slice(5, 7) === ListF.month)
     .filter(r => !ListF.cat || r.catKey === ListF.cat)
     .filter(r => !q || (r.memo + ' ' + r.cat + ' ' + (r.note || '') + ' ' + r.method).toLowerCase().includes(q))
     .sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
@@ -2265,13 +2308,13 @@ PAGES.list = () => {
   const sumExp = rows.filter(r => r.kind === 'records').reduce((s, r) => s + r.amount, 0);
   const sumInc = rows.filter(r => r.kind === 'incomes').reduce((s, r) => s + r.amount, 0);
   const sumKai = rows.filter(r => r.kind === 'kaigyohi' && !r.dim).reduce((s, r) => s + r.amount, 0);
-  let h = pageHead('取引一覧', `${St.year}年・${rows.length}件　行をタップすると修正・削除・移動ができます`, `<button class="btn sec sm" onclick="exportList()">⬇ CSV</button>`);
+  let h = pageHead('取引一覧', `${ListF.allYears ? 'すべての年' : St.year + '年'}・${rows.length}件　行をタップすると修正・削除・移動ができます`, `<button class="btn sec sm" onclick="exportList()">⬇ CSV</button>`);
   h += `<div class="card no-print"><div class="seg" style="margin-bottom:10px">${[['all', 'すべて'], ['exp', '支出'], ['inc', '収入'], ['kai', '開業費']].map(([k, l]) => `<button class="${ListF.type === k ? 'on' : ''}" onclick="ListF.type='${k}';ListF.cat='';render()">${l}</button>`).join('')}</div>
     <div class="form" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-      <select onchange="ListF.month=this.value;render()"><option value="">${St.year}年 すべての月</option>${Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map(m => `<option value="${m}" ${ListF.month === m ? 'selected' : ''}>${+m}月</option>`).join('')}</select>
+      <select onchange="ListF.month=this.value;render()" ${ListF.allYears ? 'disabled' : ''}><option value="">${ListF.allYears ? 'すべての年・月' : St.year + '年 すべての月'}</option>${Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map(m => `<option value="${m}" ${ListF.month === m ? 'selected' : ''}>${+m}月</option>`).join('')}</select>
       <select onchange="ListF.cat=this.value;render()"><option value="">すべての科目・種類</option>${cats.map(c => `<option value="${attr(c)}" ${ListF.cat === c ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('')}</select>
       <input type="text" placeholder="🔍 キーワード" value="${attr(ListF.q)}" onchange="ListF.q=this.value;render()">
-    </div>${ListF.type === 'all' ? `<label class="muted" style="display:block;margin-top:8px"><input type="checkbox" ${ListF.kai ? 'checked' : ''} onchange="ListF.kai=this.checked;render()"> 開業費も表示する</label>` : ''}</div>`;
+    </div><div class="row" style="gap:18px;margin-top:8px;flex-wrap:wrap">${ListF.type === 'all' ? `<label class="muted"><input type="checkbox" ${ListF.kai ? 'checked' : ''} onchange="ListF.kai=this.checked;render()"> 開業費も表示する</label>` : ''}<label class="muted"><input type="checkbox" id="lf-ally" ${ListF.allYears ? 'checked' : ''} onchange="ListF.allYears=this.checked;render()"> すべての年から探す</label></div></div>`;
   h += `<div class="grid" style="margin-bottom:14px"><div class="kpi"><div class="l">支出（経費になる額）</div><div class="v c-red">${fmt(sumExp)}</div></div><div class="kpi"><div class="l">収入</div><div class="v c-blue">${fmt(sumInc)}</div></div>${ListF.type === 'all' && ListF.kai || ListF.type === 'kai' ? `<div class="kpi"><div class="l">開業費（未移動）</div><div class="v c-orange">${fmt(sumKai)}</div></div>` : ''}</div>`;
   if (!rows.length) return h + `<div class="card">${emptyBox('📋', '該当する取引がありません')}</div>`;
   h += `<div class="card hide-sm"><div class="tw"><table><thead><tr><th>日付</th><th>区分</th><th>科目・種類</th><th>内容</th><th>支払・入金</th><th class="n">金額</th><th>所得</th></tr></thead><tbody>${rows.map(r => `
@@ -2302,7 +2345,7 @@ PAGES.kaigyohi = () => {
   const ws = St.W.filter(w => w.action && w.action.kind === 'kaigyohi');
   if (ws.length) h += `<div class="card"><h3>⚠️ 確認してほしい開業費 <span class="sub">${ws.length}件</span></h3>${ws.map(w => `<div class="check-item"><div class="lv">${w.level === 'error' ? '❌' : '⚠️'}</div><div style="flex:1"><div class="t">${esc(w.title)}</div><div class="d">${esc(w.detail)}</div></div><button class="btn sec sm" onclick="App.go('entry',{edit:{kind:'kaigyohi',id:'${w.action.id}'}})">修正</button></div>`).join('')}</div>`;
   h += `<div class="card"><h3>📋 開業費の一覧 <span class="sub">${list.length}件</span></h3>${list.length ? `<div class="tw"><table><thead><tr><th>日付</th><th>カテゴリ</th><th>内容</th><th class="n">金額</th><th>状態</th><th></th></tr></thead><tbody>${list.map(k => `
-    <tr class="${k.moved ? 'dim' : ''}"><td class="nw">${k.date}</td><td>${esc(k.category)}</td><td>${esc(k.memo)}${Core.extractUsd(k.note) ? `<div class="muted">$${Core.extractUsd(k.note).usd}</div>` : ''}</td><td class="n c-orange">${fmt(k.amount)}</td><td>${k.moved ? '<span class="badge ok">経費へ移動済み</span>' : (S.openDate && k.date >= S.openDate ? '<span class="badge exp">開業後の日付</span>' : '')}</td>
+    <tr class="${k.moved ? 'dim' : ''}"><td class="nw">${k.date}</td><td>${esc(catLabel(k.category))}</td><td>${esc(k.memo)}${Core.extractUsd(k.note) ? `<div class="muted">$${Core.extractUsd(k.note).usd}</div>` : ''}</td><td class="n c-orange">${fmt(k.amount)}</td><td>${k.moved ? '<span class="badge ok">経費へ移動済み</span>' : (S.openDate && k.date >= S.openDate ? '<span class="badge exp">開業後の日付</span>' : '')}</td>
     <td class="nw"><button class="btn sec sm" onclick="App.go('entry',{edit:{kind:'kaigyohi',id:'${k.id}'}})">修正</button> ${k.moved ? '' : `<button class="btn sm" onclick="kaigyohiToExpense('${k.id}')">→経費</button>`}</td></tr>`).join('')}
     <tr class="total"><td colspan="3">合計（移動済みを除く）</td><td class="n">${fmt(st.total)}</td><td colspan="2"></td></tr></tbody></table></div>` : emptyBox('🌱', '開業費の登録がありません')}</div>`;
   const ys = Object.keys(st.byYear);
@@ -2569,8 +2612,7 @@ function recDest(t, date, S) {
   return 'exp';
 }
 function recKaiCat(category) {
-  const base = String(category || '').split('_')[0];
-  return Core.KAIGYOHI_CATS.includes(base) ? base : 'その他開業費';
+  return category || '雑費';  // 開業費も支出（経費）と同じ科目を使う
 }
 function recPreview(i) {
   const t = (St.S.recurring || [])[i], el = $('rec-p-' + i); if (!t || !el) return;

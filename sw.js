@@ -1,7 +1,7 @@
 // 経費ノート Service Worker — 圏外でもアプリの画面を開けるようにする
 // ・アプリの画面（HTML・アイコン）だけを端末に保存します。データ（スプレッドシート）には触れません。
 // ・電波があるときは常に最新の画面を取りに行き、圏外のときだけ保存した画面を使います。
-const CACHE = 'keiji-note-v3.2.2';
+const CACHE = 'keiji-note-v3.2.5';
 const CORE = ['keiji-kanri-sheets.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
