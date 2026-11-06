@@ -244,7 +244,7 @@ details.more summary{cursor:pointer;color:var(--primary2);font-size:13px;font-we
 </div>
 
 <input type="file" id="rc-in-camera" accept="image/*" capture="environment" hidden onchange="Rc.onFiles(this)">
-<input type="file" id="rc-in-pick" accept="image/*" hidden onchange="Rc.onFiles(this)">
+<input type="file" id="rc-in-pick" accept="image/*,application/pdf,.pdf" hidden onchange="Rc.onFiles(this)">
 <div id="modal-root"></div>
 <div id="busy"><div class="spinner"></div><div id="busy-msg">読み込み中…</div></div>
 <div id="toast"></div>
@@ -859,14 +859,23 @@ const Core = (() => {
       const re4 = /(\d{1,2})\s*月\s*(\d{1,2})\s*日/g; // 11月2日（年なし）
       while ((m = re4.exec(t))) { let v = validYMD(ty, +m[1], +m[2]); if (v && v > today) v = validYMD(ty - 1, +m[1], +m[2]); if (v) found.push({ v, idx: m.index }); }
     }
-    // 未来の日付（有効期限など）は除き、文中で最初に出てくるものを使う
-    const ok = found.filter(f => f.v <= addDays(today, 1)).sort((a, b) => a.idx - b.idx);
+    // 未来の日付（有効期限など）は除く。「決済日」「ご利用日」など支払った日の印がある日付を優先し、
+    // 「発行日」「開催日」などは後回し。それ以外は文中で最初に出てくるもの
+    const lineOf = idx => { const st = t.lastIndexOf('\n', idx) + 1; const en = t.indexOf('\n', idx); return t.slice(st, en < 0 ? t.length : en); };
+    const before = idx => { const st = Math.max(t.lastIndexOf('\n', idx) + 1, idx - 12); return t.slice(st, idx); };
+    const score = f => {
+      const near = before(f.idx), line = lineOf(f.idx);
+      if (/(決済|支払|お支払|ご利用|利用|購入|取引|売上|領収|お買上|注文|ご注文)日?(時)?\s*[:：]?\s*$/.test(near)) return 3;
+      if (/(発行|開催|有効|期限|配送|お届け|出荷|印刷)/.test(near) || /有効期限|期限/.test(line)) return 0;
+      return 1;
+    };
+    const ok = found.filter(f => f.v <= addDays(today, 1)).map(f => Object.assign(f, { s: score(f) })).sort((a, b) => b.s - a.s || a.idx - b.idx);
     return ok.length ? ok[0].v : '';
   }
   const addDays = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); const dt = new Date(y, m - 1, d + n); return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`; };
 
   const AMOUNT_KEYS = [['合計', 10], ['お買上', 9], ['お買い上げ', 9], ['ご請求', 9], ['請求金額', 9], ['領収金額', 9], ['お支払', 8], ['支払金額', 8], ['総額', 8], ['税込', 6], ['計', 4], ['TOTAL', 7], ['Total', 7], ['金額', 3]];
-  const AMOUNT_EXCLUDE = /小計|預り|預かり|お預|釣|つり|おつり|対象|内税|外税|消費税|税額|税率|値引|割引|ポイント|点数|残高|チャージ|クーポン|カード番号/;
+  const AMOUNT_EXCLUDE = /小計|預り|預かり|お預|釣|つり|おつり|対象|内税|外税|消費税(?!込)|税額|税率|値引|割引|ポイント|点数|残高|チャージ|クーポン|カード番号/;
   const NUM_RE = /([¥]?)\s*(\d{1,3}(?:,\s?\d{3})+|\d{1,7})(?![\d,]*\s*(?:点|個|%|％|時|分|年|月|日))\s*(円?)/g;
   function numbersIn(line) {
     const out = []; let m; NUM_RE.lastIndex = 0;
@@ -897,12 +906,20 @@ const Core = (() => {
     lines.forEach(line => { const c = line.replace(/\s+/g, ''); if (AMOUNT_EXCLUDE.test(c)) return; numbersIn(c).filter(n => n.cur).forEach(n => cands.push(n.v)); });
     return cands.length ? Math.max(...cands) : 0;
   }
-  const STORE_SKIP = /領収|レシート|receipt|いらっしゃいませ|ありがと|毎度|またの|ご来店|お買い|様$|^No\.?|登録番号|^T\d|〒|TEL|Tel|電話|FAX|http|www\.|@|^\d|\d{2,4}-\d{2,4}-\d{3,4}|年.*月.*日|\d{1,2}:\d{2}|合計|小計|¥|円|担当|レジ|責|店舗|伝票|取引/i;
+  const STORE_SKIP = /領収|レシート|receipt|いらっしゃいませ|ありがと|毎度|またの|ご来店|お買い|様$|^No\.?|登録番号|^T\d|〒|TEL|Tel|電話|FAX|http|www\.|@|^\d|\d{2,4}-\d{2,4}-\d{3,4}|年.*月.*日|\d{1,2}:\d{2}|合計|小計|¥|円|担当|レジ|責|店舗|伝票|取引|注文|番号|創業|創立|since|軽減|税率|対象/i;
+  const mostlySymbols = l => { const letters = (l.match(/[A-Za-zぁ-んァ-ヶ一-龯々]/g) || []).length; return letters < 2 || letters / l.replace(/\s/g, '').length < 0.5; };
   function parseReceiptStore(text) {
-    const lines = toHalfWidth(text).split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 12);
-    const corp = lines.find(l => /株式会社|有限会社|合同会社|\(株\)|㈱/.test(l) && l.length <= 40 && !/登録番号|TEL|〒/.test(l));
+    const all = toHalfWidth(text).split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const clean = v => v.replace(/\s*[印㊞]$/, '').replace(/^[\s*★☆■◆●・\-=:：]+|[\s*★☆■◆●・\-=]+$/g, '').trim();
+    // 「販売者」「店舗名」などの見出しがあれば、その後ろ（または次の行）を使う
+    const LABEL = /^(販売者|販売元|店舗名|加盟店名?|ご利用店舗|お店|事業者名?|主催者|発行者|発行元)\s*[:：]?\s*(.*)$/;
+    const labelled = [];
+    all.forEach((l, i) => { const m = l.match(LABEL); if (!m) return; const v = m[2] || all[i + 1] || ''; if (v && !STORE_SKIP.test(v) && !mostlySymbols(v) && v.length <= 40) labelled.push({ v: clean(v), pri: /^販売|店舗|加盟店|ご利用店舗|お店|事業者/.test(m[1]) ? 2 : 1 }); });
+    if (labelled.length) return labelled.sort((a, b) => b.pri - a.pri)[0].v;
+    const lines = all.slice(0, 12);
+    const corp = all.find(l => /株式会社|有限会社|合同会社|\(株\)|㈱/.test(l) && l.length <= 40 && !/登録番号|TEL|〒|御中|様/.test(l));
     if (corp) return corp.replace(/\s*[印㊞]$/, '').replace(/^[\s*★☆■◆●・\-=]+|[\s*★☆■◆●・\-=]+$/g, '');
-    const l = lines.find(x => x.length >= 2 && x.length <= 30 && !STORE_SKIP.test(x) && /[A-Za-zぁ-んァ-ヶ一-龯]/.test(x));
+    const l = lines.find(x => x.length >= 2 && x.length <= 30 && !STORE_SKIP.test(x) && !mostlySymbols(x));
     return l ? l.replace(/^[\s*★☆■◆●・\-=]+|[\s*★☆■◆●・\-=]+$/g, '') : '';
   }
   function parseReceiptInvoice(text) {
@@ -947,7 +964,7 @@ if (typeof module !== 'undefined') module.exports = Core;
 // ════════════════════════════════════════════════════════════
 //  経費ノート 画面（基本部分：状態・通信・画面切り替え・ホーム）
 // ════════════════════════════════════════════════════════════
-const APP_VERSION = '3.1.1';
+const APP_VERSION = '3.2.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const { fmt, num, toNum, localToday, yearOf, monthOf, normDate, pad2 } = Core;
@@ -1752,8 +1769,27 @@ const Img = {
     const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(im, 0, 0, w, h);
     return c.toDataURL('image/jpeg', quality);
   },
+  // PDFは縮小せず、そのまま送る（元のデータのまま保存するため）
+  isPdf(file) { return file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''); },
+  readBase64(file) {
+    return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = () => rej(new Error('ファイルを読み込めませんでした')); fr.readAsDataURL(file); });
+  },
+  pdfThumb(name) {
+    const c = document.createElement('canvas'); c.width = 165; c.height = 220;
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 165, 220); x.strokeStyle = '#cfd8d3'; x.lineWidth = 4; x.strokeRect(2, 2, 161, 216);
+    x.fillStyle = '#c2410c'; x.fillRect(0, 70, 165, 50); x.fillStyle = '#fff'; x.font = 'bold 34px sans-serif'; x.textAlign = 'center'; x.fillText('PDF', 82, 108);
+    x.fillStyle = '#4f5d56'; x.font = '13px sans-serif';
+    const n = String(name || '').replace(/\.pdf$/i, '');
+    x.fillText(n.slice(0, 14), 82, 150); if (n.length > 14) x.fillText(n.slice(14, 28), 82, 168);
+    return c.toDataURL('image/jpeg', 0.7);
+  },
   async prepare(file) {
-    if (file.type && !/^image\//.test(file.type)) throw new Error('画像ファイル（写真）を選んでください。');
+    if (Img.isPdf(file)) {
+      if (file.size > 10 * 1024 * 1024) throw new Error('PDFが大きすぎます（10MBまで）。');
+      return { data: await Img.readBase64(file), mime: 'application/pdf', thumb: Img.pdfThumb(file.name), isPdf: true };
+    }
+    if (file.type && !/^image\//.test(file.type)) throw new Error('写真（JPEG・PNG）かPDFのファイルを選んでください。');
     const url = URL.createObjectURL(file);
     try {
       const im = await Img.load(url);
@@ -1911,6 +1947,42 @@ const Rc = {
       <button class="btn sec" onclick="closeModal()">あとで</button></div>`, { noFocus: true });
   },
   quickSnap() { Rc.pick('camera', 'box'); },
+  importFolderDialog() {
+    if (St.oldReceiptGas || (St.serverVersion && St.serverVersion < '3.2')) { alertBox('GASの更新が必要です', 'フォルダからの取り込みを使うには、新しい gas-code.gs を貼り付けて「新バージョン」でデプロイしてください。'); return; }
+    modal(`<h3>📂 ドライブのフォルダから取り込む</h3>
+      <div style="font-size:13.5px">Googleドライブのフォルダに入っている <b>PDF・写真の領収書</b> を、まとめて領収書BOXに入れます。</div>
+      <ul style="font-size:13px;padding-left:18px;margin:8px 0">
+        <li><b>元のファイルはそのまま</b>です（動かさず、名前も変えません）。コピーを「経費ノート_領収書」に入れます</li>
+        <li>一度取り込んだファイルは、もう一度実行しても<b>二重には入りません</b></li>
+        <li>そのフォルダの中だけが対象です（中のフォルダは別に取り込んでください）</li></ul>
+      <div class="fg"><label>フォルダのURL</label><input type="url" id="imp-url" placeholder="https://drive.google.com/drive/folders/..."><div class="hint">Googleドライブでフォルダを開き、ブラウザのアドレス欄のURLをコピーして貼り付けてください。</div></div>
+      <div id="imp-progress" style="margin-top:10px"></div>
+      <div class="btns" id="imp-btns"><button class="btn" onclick="Rc.runImport()">取り込む</button><button class="btn sec" onclick="closeModal()">閉じる</button></div>`);
+  },
+  async runImport() {
+    const url = $('imp-url').value.trim();
+    if (!url) return;
+    const prog = $('imp-progress'), btns = $('imp-btns');
+    btns.innerHTML = '<span class="muted">⟳ 取り込み中です。画面を閉じずにお待ちください…</span>';
+    let total = 0, done = 0, errors = [], name = '', already = 0, rounds = 0, ocrFail = 0;
+    try {
+      for (;;) {
+        const r = await API.call('importFolder', { folder: url, limit: 6 }, 330000);
+        if (!r.ok) throw new Error(r.error);
+        name = r.folderName; if (!rounds) { total = r.total; already = r.alreadyImported; }
+        done += r.imported.length; errors = errors.concat(r.errors || []); ocrFail += r.imported.filter(x => x.ocrError).length;
+        rounds++;
+        prog.innerHTML = `<div class="alert info">📂 <div>「${esc(name)}」：${total}件中 ${already ? `${already}件は取り込み済み、` : ''}<b>${done}件</b>を取り込みました${r.remaining ? `（残り ${r.remaining}件）` : ''}</div></div>`;
+        if (!r.remaining || (!r.imported.length && !(r.errors || []).length) || rounds > 60) break;
+      }
+      await App.loadData({ silent: true, background: true });
+      prog.innerHTML = `<div class="alert ok">✅ <div>「${esc(name)}」から <b>${done}件</b> を取り込みました。${already ? `（${already}件はすでに取り込み済みでした）` : ''}${ocrFail ? `<br>⚠️ ${ocrFail}件は文字を読み取れませんでした。BOXで「もう一度読み取る」を試すか、手で入力してください。` : ''}${errors.length ? `<br>⚠️ 取り込めなかったファイル：${errors.map(e => esc(e.name) + '（' + esc(e.error) + '）').join('、')}` : ''}<br>領収書BOXの「まだ入力していない写真」から、1件ずつ取引にしてください。</div></div>`;
+      btns.innerHTML = '<button class="btn" onclick="closeModal();render()">BOXを見る</button>';
+    } catch (e) {
+      prog.innerHTML = `<div class="alert err">⚠️ <div>${esc(e.message)}${done ? `<br>（${done}件は取り込み済みです。もう一度「取り込む」を押すと続きから取り込みます）` : ''}</div></div>`;
+      btns.innerHTML = `<button class="btn" onclick="Rc.runImport()">もう一度</button><button class="btn sec" onclick="closeModal();render()">閉じる</button>`;
+    }
+  },
   async reocr(id) {
     busy('もう一度、文字を読み取っています…');
     try {
@@ -1925,11 +1997,13 @@ const Rc = {
   },
   async view(id) {
     const rc = St.DB.receipts.find(x => x.id === id) || {};
+    if (/\.pdf$/i.test(rc.fileName || '') && rc.url) { window.open(rc.url, '_blank', 'noopener'); return; } // PDFはGoogleドライブで開く
     busy('写真を読み込み中…');
     try {
       const r = await API.call('getReceiptImage', { id });
       unbusy();
       if (!r.ok) throw new Error(r.error);
+      if (r.mime === 'application/pdf') { openPdf(r.data); return; }
       showImage(`data:${r.mime};base64,${r.data}`, r.fileName || rc.fileName, r.url || rc.url);
     } catch (e) {
       unbusy();
@@ -1939,7 +2013,7 @@ const Rc = {
   },
   async viewLocal(qid) {
     const it = (await Outbox.all()).find(x => x.qid === qid);
-    if (it && it.image) showImage(`data:${it.mime};base64,${it.image}`, '未送信の写真');
+    if (it && it.image) { if (it.mime === 'application/pdf') openPdf(it.image); else showImage(`data:${it.mime};base64,${it.image}`, '未送信の写真'); }
   },
   remove(id) {
     confirmBox('この写真を削除しますか？', 'Googleドライブのゴミ箱に移動します（30日以内なら元に戻せます）。<br>紙の領収書は捨てずに保管してください。', '削除する', async () => {
@@ -1951,6 +2025,14 @@ const Rc = {
     confirmBox('未送信のデータを削除しますか？', 'この端末からだけ削除されます（まだスプレッドシートには入っていません）。', '削除する', async () => { await Outbox.remove(qid); await Outbox.refreshCount(); render(); }, true);
   },
 };
+function openPdf(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const w = window.open(url, '_blank');
+  if (!w) location.href = url;
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+const rcIcon = r => (/\.pdf$/i.test((r && r.fileName) || '') ? '📄' : '🧾');
 function showImage(src, title, url, note) {
   modal(`<h3 class="between"><span style="font-size:14px;word-break:break-all">${esc(title || '領収書')}</span><button class="btn sec sm" onclick="closeModal()">✕</button></h3>
     ${note ? `<div class="alert warn">${esc(note)}</div>` : ''}<img src="${attr(src)}" alt="領収書の写真" style="width:100%;border-radius:8px;border:1px solid var(--border)">
@@ -1973,7 +2055,7 @@ Object.assign(Entry, {
   },
   rcInner(unreg) {
     const rc = this.rc;
-    if (!rc) return `<div class="row"><button class="btn" onclick="Rc.pick('camera','entry')">📷 レシートを撮る</button><button class="btn sec" onclick="Rc.pick('file','entry')">🖼 写真を選ぶ</button>${unreg ? `<button class="btn sec" onclick="Entry.chooseFromBox()">🧾 BOXから選ぶ（${unreg}）</button>` : ''}</div>
+    if (!rc) return `<div class="row"><button class="btn" onclick="Rc.pick('camera','entry')">📷 レシートを撮る</button><button class="btn sec" onclick="Rc.pick('file','entry')">🖼 写真・PDFを選ぶ</button>${unreg ? `<button class="btn sec" onclick="Entry.chooseFromBox()">🧾 BOXから選ぶ（${unreg}）</button>` : ''}</div>
       <div class="hint" style="margin-top:6px">撮ると、日付・金額・お店の名前を読み取って入力欄に入れます（保存の前に必ず確認してください）。</div>`;
     const p = rc.parsed || (rc.ocrText ? Core.parseReceipt(rc.ocrText) : null);
     const status = rc.status === 'uploading' ? '<span class="muted">⟳ 保存して文字を読み取っています…</span>'
@@ -2065,13 +2147,13 @@ Object.assign(Entry, {
   },
   viewRc() {
     const rc = this.rc; if (!rc) return;
-    if (rc.data) showImage(`data:${rc.mime};base64,${rc.data}`, 'レシートの写真');
+    if (rc.data) { if (rc.mime === 'application/pdf') openPdf(rc.data); else showImage(`data:${rc.mime};base64,${rc.data}`, 'レシートの写真'); }
     else Rc.view(rc.id);
   },
   chooseFromBox() {
     const list = (St.DB.receipts || []).filter(r => r.status !== '登録済').sort((a, b) => String(b.takenAt).localeCompare(String(a.takenAt)));
     window.__pickRc = id => { closeModal(); const r = St.DB.receipts.find(x => x.id === id); Entry.rc = { id, thumb: r.thumb, status: 'uploaded', ocrText: r.ocrText || '', parsed: Core.parseReceipt(r.ocrText || '') }; Entry.drawRc(); Entry.applyParsed(false); };
-    modal(`<h3 class="between">🧾 領収書BOXから選ぶ <button class="btn sec sm" onclick="closeModal()">✕</button></h3>${list.map(r => { const p = Core.parseReceipt(r.ocrText || ''); return `<div class="list-item" onclick="__pickRc('${attr(r.id)}')">${r.thumb ? `<img src="${attr(r.thumb)}" class="rc-thumb sm">` : '<div class="rc-thumb sm rc-ph">🧾</div>'}<div class="main-t"><div class="t1">${esc(p.store || '（店名なし）')}</div><div class="t2">${p.date || ''} ${p.amount ? fmt(p.amount) : ''}　撮影 ${esc(String(r.takenAt).slice(0, 16))}</div></div></div>`; }).join('')}`, { noFocus: true });
+    modal(`<h3 class="between">🧾 領収書BOXから選ぶ <button class="btn sec sm" onclick="closeModal()">✕</button></h3>${list.map(r => { const p = Core.parseReceipt(r.ocrText || ''); return `<div class="list-item" onclick="__pickRc('${attr(r.id)}')">${r.thumb ? `<img src="${attr(r.thumb)}" class="rc-thumb sm">` : `<div class="rc-thumb sm rc-ph">${rcIcon(r)}</div>`}<div class="main-t"><div class="t1">${esc(p.store || '（店名なし）')}</div><div class="t2">${p.date || ''} ${p.amount ? fmt(p.amount) : ''}　撮影 ${esc(String(r.takenAt).slice(0, 16))}</div></div></div>`; }).join('')}`, { noFocus: true });
   },
   async queue(o, action) {
     const rc = this.rc;
@@ -2088,16 +2170,16 @@ Object.assign(Entry, {
 const BoxF = { q: '' };
 PAGES.receipts = () => {
   let h = pageHead('領収書BOX', 'レシートの写真を撮っておき、あとで落ち着いて入力できます。圏外で入力したものもここに入ります');
-  h += `<div class="card"><div class="row"><button class="btn" onclick="Rc.pick('camera','box')">📷 撮るだけ（あとで入力）</button><button class="btn sec" onclick="Rc.pick('file','box')">🖼 写真から選ぶ（何枚でも）</button></div>
-    <div class="hint" style="margin-top:8px">写真はGoogleドライブの「経費ノート_領収書」フォルダに年ごとに保存されます。<b>紙の領収書・レシートは捨てずに保管してください</b>（写真は探しやすくするための控えです）。</div></div>`;
+  h += `<div class="card"><div class="row"><button class="btn" onclick="Rc.pick('camera','box')">📷 撮るだけ（あとで入力）</button><button class="btn sec" onclick="Rc.pick('file','box')">🖼 写真・PDFを選ぶ（何枚でも）</button><button class="btn sec" onclick="Rc.importFolderDialog()">📂 ドライブのフォルダから取り込む</button></div>
+    <div class="hint" style="margin-top:8px">写真・PDFはGoogleドライブの「経費ノート_領収書」フォルダに年ごとに保存されます。<b>紙の領収書・レシートは捨てずに保管してください</b>（写真は探しやすくするための控えです）。</div></div>`;
   if (St.oldReceiptGas) h += `<div class="alert err">⚠️ <div>GASが古いため、写真を保存できません。新しい gas-code.gs に更新してください（手順書の「領収書の写真」）。</div></div>`;
   else if (St.ocrReady === false) h += `<div class="alert warn">🔤 <div>文字の自動読み取りが使えない設定です（写真の保存はできます）。Apps Script で「サービス ＋ → Drive API」を追加すると使えるようになります。</div></div>`;
   h += `<div id="box-outbox"></div>`;
   const unreg = (St.DB.receipts || []).filter(r => r.status !== '登録済').sort((a, b) => String(b.takenAt).localeCompare(String(a.takenAt)));
-  h += `<div class="card"><h3>🧾 まだ入力していない写真 <span class="sub">${unreg.length}枚</span></h3>${unreg.length ? `<div class="rc-grid">${unreg.map(r => {
+  h += `<div class="card"><h3>🧾 まだ入力していない写真・PDF <span class="sub">${unreg.length}枚</span></h3>${unreg.length ? `<div class="rc-grid">${unreg.map(r => {
     const p = Core.parseReceipt(r.ocrText || '');
-    return `<div class="rc-card">${r.thumb ? `<img src="${attr(r.thumb)}" class="rc-thumb lg" onclick="Rc.view('${attr(r.id)}')" alt="レシート">` : `<div class="rc-thumb lg rc-ph" onclick="Rc.view('${attr(r.id)}')">🧾</div>`}
-      <div class="rc-info"><div class="t1">${esc(p.store || '（店名を読み取れず）')}</div>${!r.ocrText ? `<button class="btn sec sm" style="margin:2px 0" onclick="Rc.reocr('${attr(r.id)}')">🔄 もう一度読み取る</button>` : ''}<div class="muted">${p.date || '日付?'}　${p.amount ? '<b class="mono">' + fmt(p.amount) + '</b>' : '金額?'}</div><div class="muted" style="font-size:11px">撮影 ${esc(String(r.takenAt).slice(0, 16))}</div>
+    return `<div class="rc-card">${r.thumb ? `<img src="${attr(r.thumb)}" class="rc-thumb lg" onclick="Rc.view('${attr(r.id)}')" alt="レシート">` : `<div class="rc-thumb lg rc-ph" onclick="Rc.view('${attr(r.id)}')">${rcIcon(r)}</div>`}
+      <div class="rc-info"><div class="t1">${esc(p.store || '（店名を読み取れず）')}</div>${/取込元: /.test(r.note || '') ? `<div class="muted" style="font-size:11px;word-break:break-all">${esc(String(r.note).match(/取込元: (.*?) 取込元ID:/) ? String(r.note).match(/取込元: (.*?) 取込元ID:/)[1] : '')}</div>` : ''}${!r.ocrText ? `<button class="btn sec sm" style="margin:2px 0" onclick="Rc.reocr('${attr(r.id)}')">🔄 もう一度読み取る</button>` : ''}<div class="muted">${p.date || '日付?'}　${p.amount ? '<b class="mono">' + fmt(p.amount) + '</b>' : '金額?'}</div><div class="muted" style="font-size:11px">${/取込元: /.test(r.note || '') ? 'ファイル保存' : '撮影'} ${esc(String(r.takenAt).slice(0, 16))}</div>
       <div class="row" style="gap:4px;margin-top:6px"><button class="btn sm" style="background:var(--red)" onclick="App.go('entry',{tab:'exp',receipt:'${attr(r.id)}'})">支出</button><button class="btn sm blue" onclick="App.go('entry',{tab:'inc',receipt:'${attr(r.id)}'})">収入</button><button class="btn sm orange" onclick="App.go('entry',{tab:'kai',receipt:'${attr(r.id)}'})">開業費</button><button class="btn danger sm" onclick="Rc.remove('${attr(r.id)}')">🗑</button></div></div></div>`;
   }).join('')}</div>` : emptyBox('✨', '未入力の写真はありません')}</div>`;
   // 登録済み（検索できる）
@@ -2801,7 +2883,7 @@ PAGES.settings = () => {
     <div class="hint" style="margin-top:6px">バックアップはGoogleドライブの「経費ノート_バックアップ」フォルダに作られます。初回はGoogleの許可画面が出ることがあります（手順書を参照）。</div></div>`;
   h += `<div class="card"><h3>🕘 変更履歴 <button class="btn sec sm" onclick="loadLog()">読み込む</button></h3><div id="st-log" class="muted">追加・修正・削除の記録は、スプレッドシートの「変更履歴」シートに残ります。</div></div>`;
   h += `<div class="card"><h3>ℹ️ アプリ情報</h3><div class="kv"><div>アプリ</div><div>経費ノート v${APP_VERSION}</div><div>GAS</div><div>${esc(St.serverVersion || '未接続')}</div><div>データ件数</div><div>経費 ${St.DB.records.length}・収入 ${St.DB.incomes.length}・開業費 ${St.DB.kaigyohi.length}・固定資産 ${St.DB.deprec.length}・振替伝票 ${St.DB.journals.length}</div></div>
-    <div class="btns"><button class="btn sec sm" onclick="localStorage.removeItem('keiji_cache_v3');toast('この端末の一時保存を消しました')">この端末の一時保存を消す</button><button class="btn danger sm" onclick="disconnect()">接続をやめる（データは消えません）</button></div></div>`;
+    <div class="btns"><button class="btn sm" onclick="forceUpdate()">🔄 アプリを最新版に更新</button><button class="btn sec sm" onclick="localStorage.removeItem('keiji_cache_v3');toast('この端末の一時保存を消しました')">この端末の一時保存を消す</button><button class="btn danger sm" onclick="disconnect()">接続をやめる（データは消えません）</button></div></div>`;
   return h;
 };
 function addMethod(kind) {
@@ -2863,6 +2945,16 @@ async function loadLog() {
     if (!r.ok) throw new Error(r.error);
     el.innerHTML = r.log.length ? `<div class="tw"><table><thead><tr><th>日時</th><th>操作</th><th>シート</th><th>内容</th></tr></thead><tbody>${r.log.map(l => { let s = ''; try { const o = JSON.parse(l.after || l.before || '{}'); s = [o.date, o.memo || o.name || '', o.amount !== undefined ? fmt(o.amount) : (o.cost !== undefined ? fmt(o.cost) : '')].filter(Boolean).join(' '); } catch (e) {} return `<tr><td class="nw">${esc(l.at)}</td><td>${esc(l.op)}</td><td>${esc(l.sheet)}</td><td>${esc(s)}</td></tr>`; }).join('')}</tbody></table></div>` : '履歴はまだありません';
   } catch (e) { el.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; }
+}
+// 端末に保存した古い画面を捨てて、最新版を読み込み直す（未送信のデータ・設定は消えません）
+async function forceUpdate() {
+  if (navigator.onLine === false) { alertBox('圏外です', '電波のある場所で、もう一度押してください。'); return; }
+  busy('最新版を読み込んでいます…');
+  try {
+    if (navigator.serviceWorker) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r => r.unregister())); }
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.filter(k => k.startsWith('keiji-note-')).map(k => caches.delete(k))); }
+  } catch (e) {}
+  location.replace(location.pathname + '?v=' + Date.now() + location.hash);
 }
 function disconnect() {
   confirmBox('接続をやめますか？', 'この端末からURLの設定を消します。スプレッドシートのデータは消えません。', 'やめる', () => {
