@@ -981,7 +981,7 @@ if (typeof module !== 'undefined') module.exports = Core;
 // ════════════════════════════════════════════════════════════
 //  経費ノート 画面（基本部分：状態・通信・画面切り替え・ホーム）
 // ════════════════════════════════════════════════════════════
-const APP_VERSION = '3.2.5';
+const APP_VERSION = '3.2.7';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const { fmt, num, toNum, localToday, yearOf, monthOf, normDate, pad2 } = Core;
@@ -1192,7 +1192,7 @@ const App = {
   },
   reload() { App.loadData({ silent: false }); },
 
-  setYear(y) { St.year = +y; recompute(); render(); },
+  setYear(y) { St.year = +y; recompute(); renderYearSelect(); render(); },
 
   go(page, params = {}, fromHash) {
     if (!PAGES[page]) page = 'home';
@@ -2309,12 +2309,13 @@ PAGES.list = () => {
   const sumInc = rows.filter(r => r.kind === 'incomes').reduce((s, r) => s + r.amount, 0);
   const sumKai = rows.filter(r => r.kind === 'kaigyohi' && !r.dim).reduce((s, r) => s + r.amount, 0);
   let h = pageHead('取引一覧', `${ListF.allYears ? 'すべての年' : St.year + '年'}・${rows.length}件　行をタップすると修正・削除・移動ができます`, `<button class="btn sec sm" onclick="exportList()">⬇ CSV</button>`);
-  h += `<div class="card no-print"><div class="seg" style="margin-bottom:10px">${[['all', 'すべて'], ['exp', '支出'], ['inc', '収入'], ['kai', '開業費']].map(([k, l]) => `<button class="${ListF.type === k ? 'on' : ''}" onclick="ListF.type='${k}';ListF.cat='';render()">${l}</button>`).join('')}</div>
+  h += `<div class="card no-print"><div class="seg" style="margin-bottom:10px">${[['all', 'すべて'], ['exp', '支出'], ['inc', '収入'], ['kai', '開業費']].map(([k, l]) => `<button class="${ListF.type === k ? 'on' : ''}" onclick="ListF.type='${k}';ListF.cat='';${k === 'kai' ? 'ListF.allYears=true;ListF.month=\'\';' : ''}render()">${l}</button>`).join('')}</div>
     <div class="form" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-      <select onchange="ListF.month=this.value;render()" ${ListF.allYears ? 'disabled' : ''}><option value="">${ListF.allYears ? 'すべての年・月' : St.year + '年 すべての月'}</option>${Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map(m => `<option value="${m}" ${ListF.month === m ? 'selected' : ''}>${+m}月</option>`).join('')}</select>
+      <select id="lf-year" onchange="listSetYear(this.value)"><option value="all" ${ListF.allYears ? 'selected' : ''}>すべての年</option>${yearsAvailable().slice().reverse().map(y => `<option value="${y}" ${!ListF.allYears && y === St.year ? 'selected' : ''}>${y}年</option>`).join('')}</select>
+      <select id="lf-month" onchange="ListF.month=this.value;render()" ${ListF.allYears ? 'disabled' : ''}><option value="">すべての月</option>${Array.from({ length: 12 }, (_, i) => pad2(i + 1)).map(m => `<option value="${m}" ${ListF.month === m ? 'selected' : ''}>${+m}月</option>`).join('')}</select>
       <select onchange="ListF.cat=this.value;render()"><option value="">すべての科目・種類</option>${cats.map(c => `<option value="${attr(c)}" ${ListF.cat === c ? 'selected' : ''}>${esc(catLabel(c))}</option>`).join('')}</select>
       <input type="text" placeholder="🔍 キーワード" value="${attr(ListF.q)}" onchange="ListF.q=this.value;render()">
-    </div><div class="row" style="gap:18px;margin-top:8px;flex-wrap:wrap">${ListF.type === 'all' ? `<label class="muted"><input type="checkbox" ${ListF.kai ? 'checked' : ''} onchange="ListF.kai=this.checked;render()"> 開業費も表示する</label>` : ''}<label class="muted"><input type="checkbox" id="lf-ally" ${ListF.allYears ? 'checked' : ''} onchange="ListF.allYears=this.checked;render()"> すべての年から探す</label></div></div>`;
+    </div><div class="row" style="gap:18px;margin-top:8px;flex-wrap:wrap">${ListF.type === 'all' ? `<label class="muted"><input type="checkbox" ${ListF.kai ? 'checked' : ''} onchange="ListF.kai=this.checked;render()"> 開業費も表示する</label>` : ''}</div></div>`;
   h += `<div class="grid" style="margin-bottom:14px"><div class="kpi"><div class="l">支出（経費になる額）</div><div class="v c-red">${fmt(sumExp)}</div></div><div class="kpi"><div class="l">収入</div><div class="v c-blue">${fmt(sumInc)}</div></div>${ListF.type === 'all' && ListF.kai || ListF.type === 'kai' ? `<div class="kpi"><div class="l">開業費（未移動）</div><div class="v c-orange">${fmt(sumKai)}</div></div>` : ''}</div>`;
   if (!rows.length) return h + `<div class="card">${emptyBox('📋', '該当する取引がありません')}</div>`;
   h += `<div class="card hide-sm"><div class="tw"><table><thead><tr><th>日付</th><th>区分</th><th>科目・種類</th><th>内容</th><th>支払・入金</th><th class="n">金額</th><th>所得</th></tr></thead><tbody>${rows.map(r => `
@@ -2322,6 +2323,11 @@ PAGES.list = () => {
   h += `<div class="card show-sm">${rows.map(r => `<div class="list-item" style="${r.dim ? 'opacity:.5' : ''}" onclick="App.go('entry',{edit:{kind:'${r.kind}',id:'${r.id}'}})"><span class="badge ${r.cls}">${r.label}</span><div class="main-t"><div class="t1">${r.rc ? '📎 ' : ''}${esc(r.memo)}</div><div class="t2">${r.date}・${esc(r.cat)}${r.sub ? '・' + esc(r.sub) : ''}</div></div><div class="amt ${r.kind === 'incomes' ? 'c-blue' : r.kind === 'records' ? 'c-red' : 'c-orange'}">${fmt(r.amount)}</div></div>`).join('')}</div>`;
   return h;
 };
+// 一覧の「年」を変えると、画面右上の年（レポートなど全体の年）も同じ年に切り替える
+function listSetYear(v) {
+  if (v === 'all') { ListF.allYears = true; ListF.month = ''; render(); return; }
+  ListF.allYears = false; App.setYear(+v);
+}
 function exportList() {
   const rows = listRows();
   downloadText(`取引一覧_${St.year}.csv`, Core.toCSV([['日付', '区分', '科目・種類', '内容', '支払・入金', '金額（経費は按分後）', '補足', '所得区分', 'メモ', 'ID'], ...rows.map(r => [r.date, r.label, r.cat, r.memo, r.method, r.amount, r.sub, r.kubun, r.note, r.id])]));
@@ -2344,7 +2350,15 @@ PAGES.kaigyohi = () => {
   if (!S.openDate) h += `<div class="alert warn">📅 <div>開業日が未設定です。開業届を出したら<a href="#settings" onclick="App.go('settings');return false">設定</a>で開業日を入れてください。開業日に、ここの合計が帳簿の「開業費」として計上されます。</div></div>`;
   const ws = St.W.filter(w => w.action && w.action.kind === 'kaigyohi');
   if (ws.length) h += `<div class="card"><h3>⚠️ 確認してほしい開業費 <span class="sub">${ws.length}件</span></h3>${ws.map(w => `<div class="check-item"><div class="lv">${w.level === 'error' ? '❌' : '⚠️'}</div><div style="flex:1"><div class="t">${esc(w.title)}</div><div class="d">${esc(w.detail)}</div></div><button class="btn sec sm" onclick="App.go('entry',{edit:{kind:'kaigyohi',id:'${w.action.id}'}})">修正</button></div>`).join('')}</div>`;
-  h += `<div class="card"><h3>📋 開業費の一覧 <span class="sub">${list.length}件</span></h3>${list.length ? `<div class="tw"><table><thead><tr><th>日付</th><th>カテゴリ</th><th>内容</th><th class="n">金額</th><th>状態</th><th></th></tr></thead><tbody>${list.map(k => `
+  // 以前の版のカテゴリ（書籍・学習など）を、経費と同じ勘定科目にまとめて変える
+  const oldCats = [...new Set(list.map(k => k.category).filter(c => c && !Core.CAT[c]))];
+  if (oldCats.length) h += `<div class="card"><h3>🔄 以前のカテゴリをまとめて変更 <span class="sub">任意</span></h3><p class="muted" style="font-size:13px;margin:0 0 10px">開業費の科目を、支出（経費）と同じ勘定科目にそろえられます。開業費の合計や決算書の数字は変わりません（内訳の名前が変わるだけです）。</p>${oldCats.map((c, i) => {
+    const n = list.filter(k => k.category === c).length;
+    const sug = { '書籍・学習': '研修費', 'PC・機器': '消耗品費' }[c] || '';
+    return `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><b style="min-width:150px">${esc(c)}（${n}件）</b><span>→</span><div style="flex:1;min-width:200px">${categorySelect('kbc-' + i, sug)}</div><button class="btn sm" onclick="kaiBulkCat(${i})">まとめて変更</button></div>`;
+  }).join('')}</div>`;
+  window.__kaiOldCats = oldCats;
+  h += `<div class="card"><h3>📋 開業費の一覧 <span class="sub">${list.length}件</span></h3>${list.length ? `<div class="tw"><table><thead><tr><th>日付</th><th>勘定科目</th><th>内容</th><th class="n">金額</th><th>状態</th><th></th></tr></thead><tbody>${list.map(k => `
     <tr class="${k.moved ? 'dim' : ''}"><td class="nw">${k.date}</td><td>${esc(catLabel(k.category))}</td><td>${esc(k.memo)}${Core.extractUsd(k.note) ? `<div class="muted">$${Core.extractUsd(k.note).usd}</div>` : ''}</td><td class="n c-orange">${fmt(k.amount)}</td><td>${k.moved ? '<span class="badge ok">経費へ移動済み</span>' : (S.openDate && k.date >= S.openDate ? '<span class="badge exp">開業後の日付</span>' : '')}</td>
     <td class="nw"><button class="btn sec sm" onclick="App.go('entry',{edit:{kind:'kaigyohi',id:'${k.id}'}})">修正</button> ${k.moved ? '' : `<button class="btn sm" onclick="kaigyohiToExpense('${k.id}')">→経費</button>`}</td></tr>`).join('')}
     <tr class="total"><td colspan="3">合計（移動済みを除く）</td><td class="n">${fmt(st.total)}</td><td colspan="2"></td></tr></tbody></table></div>` : emptyBox('🌱', '開業費の登録がありません')}</div>`;
@@ -2352,6 +2366,25 @@ PAGES.kaigyohi = () => {
   if (ys.length) h += `<div class="card"><h3>📉 開業費償却の履歴</h3><table><thead><tr><th>年</th><th class="n">償却額</th></tr></thead><tbody>${ys.map(y => `<tr><td>${y}年</td><td class="n">${fmt(st.byYear[y])}</td></tr>`).join('')}</tbody></table></div>`;
   return h;
 };
+async function kaiBulkCat(i) {
+  const from = (window.__kaiOldCats || [])[i], to = $('kbc-' + i).value;
+  if (!from || !to) { alertBox('勘定科目を選んでください', '変更後の勘定科目を選んでから押してください。'); return; }
+  const items = St.DB.kaigyohi.filter(k => k.category === from);
+  if (!confirm(`「${from}」の開業費 ${items.length}件を「${catLabel(to)}」に変更します。よろしいですか？`)) return;
+  busy(`変更中… 0 / ${items.length}`);
+  let done = 0, err = '';
+  for (const k of items) {
+    try {
+      const r = await API.call('updateKaigyohi', { record: Object.assign({}, k, { category: to }) });
+      if (!r.ok) { err = r.error || '保存に失敗しました'; break; }
+      done++; $('busy-msg').textContent = `変更中… ${done} / ${items.length}`;
+    } catch (e) { err = e.message; break; }
+  }
+  unbusy();
+  await App.loadData({ silent: true });
+  if (err) alertBox('途中で止まりました', `${done}件を変更しました。残りは変更されていません（${err}）。もう一度押すと続きから変更します。`);
+  else toast(`✅ ${done}件を「${catLabel(to)}」に変更しました`);
+}
 function kaigyohiToExpense(id) {
   const k = St.DB.kaigyohi.find(x => x.id === String(id)); if (!k) return;
   const guess = guessExpenseCategory(k);
