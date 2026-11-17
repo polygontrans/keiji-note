@@ -298,28 +298,28 @@ const Core = (() => {
     ['旅費交通費_車','ガソリン代','旅費交通費','車関係',null,'私用と共用なら按分してください。'],
     ['地代家賃_駐車場','駐車場代','地代家賃','車関係',null,''],
     ['損害保険料_車','自動車保険（事業用分）','損害保険料','車関係',null,''],
-    ['車両費','車検・修理・維持費','車両費','車関係',null,''],
+    ['車両費','車両費（車検・修理・維持費）','車両費','車関係',null,''],
     ['仕入高','仕入（商品・材料）','仕入高','よく使う',null,'販売する商品や材料の購入。'],
-    ['消耗品費','消耗品費','消耗品費','よく使う',null,'10万円未満の物品・文房具・ソフト等。'],
-    ['旅費交通費','旅費交通費（電車・バス等）','旅費交通費','よく使う',null,'行き先と目的をメモに残すと安心です。'],
+    ['消耗品費','消耗品費（10万円未満の物品・文房具・ソフト等）','消耗品費','よく使う',null,'10万円未満の物品・文房具・ソフト等。'],
+    ['旅費交通費','旅費交通費（電車・バス・ガソリン・宿泊等）','旅費交通費','よく使う',null,'行き先と目的をメモに残すと安心です。'],
     ['接待交際費','接待交際費','接待交際費','よく使う',null,'相手先と目的をメモに残してください。'],
-    ['広告宣伝費','広告宣伝費','広告宣伝費','よく使う',null,'SNS広告・チラシ・名刺・ポートフォリオサイト等。'],
+    ['広告宣伝費','広告宣伝費（広告・名刺・チラシ等）','広告宣伝費','よく使う',null,'SNS広告・チラシ・名刺・ポートフォリオサイト等。'],
     ['工具器具備品','パソコン・機材（10万円以上は固定資産へ）','消耗品費','よく使う',null,'10万円以上なら「固定資産」として登録すると減価償却を自動計算します。'],
     ['外注工賃','外注工賃','外注工賃','よく使う',null,'外部への作業依頼。'],
     ['支払手数料','支払手数料（Etsy手数料・振込手数料等）','支払手数料','よく使う',null,''],
-    ['諸会費','諸会費','諸会費','よく使う',null,''],
+    ['諸会費','諸会費（会費・ツールの利用料等）','諸会費','よく使う',null,''],
     ['研修費','研修費・セミナー代','研修費','よく使う',null,''],
     ['新聞図書費','新聞図書費（本・資料）','新聞図書費','よく使う',null,''],
-    ['損害保険料','損害保険料','損害保険料','よく使う',null,''],
-    ['通信費','通信費（その他）','通信費','よく使う',null,''],
+    ['損害保険料','損害保険料（火災保険・自動車保険等）','損害保険料','よく使う',null,''],
+    ['通信費','通信費（ネット・スマホ・切手・AI・サーバー等）','通信費','よく使う',null,''],
     ['荷造運賃','荷造運賃（発送費）','荷造運賃','よく使う',null,''],
     ['修繕費','修繕費','修繕費','よく使う',null,''],
     ['租税公課','租税公課（印紙・事業税など）','租税公課','よく使う',null,'所得税・住民税は経費になりません。'],
     ['福利厚生費','福利厚生費','福利厚生費','その他',null,''],
     ['給料賃金','給料賃金','給料賃金','その他',null,''],
     ['利子割引料','利子割引料（借入の利息）','利子割引料','その他',null,''],
-    ['水道光熱費','水道光熱費（按分なし）','水道光熱費','その他',null,''],
-    ['地代家賃','地代家賃（按分なし・事務所等）','地代家賃','その他',null,''],
+    ['水道光熱費','水道光熱費（電気・ガス・水道）','水道光熱費','その他',null,''],
+    ['地代家賃','地代家賃（家賃・駐車場・事務所等）','地代家賃','その他',null,''],
     ['雑費','雑費','雑費','その他',null,'他のどれにも当てはまらない少額のもの。'],
     // 不動産所得向け
     ['管理費','管理費（管理会社・管理組合）','管理費','不動産',null,'不動産所得の経費。'],
@@ -329,6 +329,19 @@ const Core = (() => {
     ['損害保険料_不動産','火災保険など（物件）','損害保険料','不動産',null,'複数年分の一括払いは、その年の分だけが経費です。'],
   ].map(([value,label,account,group,anbun,hint]) => ({ value, label, account, group, anbun, hint }));
   const CAT = Object.fromEntries(CATEGORIES.map(c => [c.value, c]));
+  // 入力画面で選べる科目：やよい・freeeと同じく「勘定科目そのもの」だけを、青色申告決算書の順に並べる。
+  // AIサービス・家賃（按分）などの細かい分類は、以前のデータと家事按分の画面のために内部で残している。
+  const PICK_GROUPS = (() => {
+    const plain = CATEGORIES.filter(c => c.value === c.account && ACC[c.account]).sort((a, b) => ACC[a.account].order - ACC[b.account].order);
+    const printed = c => PL_FIXED_GENERAL.includes(c.account) || c.account === '雑費';  // 雑費も決算書に印刷されている
+    return [
+      ['決算書に印刷されている科目', plain.filter(c => printed(c) && c.account !== '雑費').concat(plain.filter(c => c.account === '雑費'))],
+      ['自分で追加する科目（決算書の空欄に書く）', plain.filter(c => !printed(c) && !['仕入高', '管理費', '借入金利子'].includes(c.account))],
+      ['売上原価（販売する商品・材料）', plain.filter(c => c.account === '仕入高')],
+      ['不動産（家賃収入の経費）', CATEGORIES.filter(c => c.group === '不動産')],
+    ];
+  })();
+  const isPickable = v => PICK_GROUPS.some(([, list]) => list.some(c => c.value === v));
 
   const KAIGYOHI_CATS = ['通信費','消耗品費','広告宣伝費','研修費','旅費交通費','諸会費','支払手数料','接待交際費','地代家賃','水道光熱費','新聞図書費','書籍・学習','PC・機器','その他開業費'];
 
@@ -964,7 +977,7 @@ const Core = (() => {
   const toCSV = rows => '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
 
   return {
-    ACCOUNTS, ACC, CATEGORIES, CAT, KAIGYOHI_CATS, INCOME_TYPES, INC, PAY_ACCOUNTS, RECEIVE_ACCOUNTS, KUBUN, KUBUN_LABEL,
+    ACCOUNTS, ACC, CATEGORIES, CAT, PICK_GROUPS, isPickable, KAIGYOHI_CATS, INCOME_TYPES, INC, PAY_ACCOUNTS, RECEIVE_ACCOUNTS, KUBUN, KUBUN_LABEL,
     PL_FIXED_GENERAL, PL_FIXED_REALESTATE, ASSET_TYPES, DEFAULT_SETTINGS,
     toNum, fmt, num, pad2, localToday, normDate, yearOf, monthOf, mergeSettings,
     areaRatio, timeRatio, defaultRatioFor, calcAdjusted,
@@ -981,7 +994,7 @@ if (typeof module !== 'undefined') module.exports = Core;
 // ════════════════════════════════════════════════════════════
 //  経費ノート 画面（基本部分：状態・通信・画面切り替え・ホーム）
 // ════════════════════════════════════════════════════════════
-const APP_VERSION = '3.2.7';
+const APP_VERSION = '3.3.0';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const { fmt, num, toNum, localToday, yearOf, monthOf, normDate, pad2 } = Core;
@@ -1431,13 +1444,13 @@ function registerServiceWorker() {
 //  取引を登録・修正（支出／収入／開業費）
 // ════════════════════════════════════════════════════════════
 function categorySelect(id, selected, onchange) {
-  const groups = {};
-  Core.CATEGORIES.forEach(c => { (groups[c.group] = groups[c.group] || []).push(c); });
   let html = `<select id="${id}" ${onchange ? `onchange="${onchange}"` : ''}><option value="">-- 選んでください --</option>`;
-  if (selected && !Core.CAT[selected]) html += `<option value="${attr(selected)}" selected>${esc(selected)}（以前の科目）</option>`;
-  for (const g in groups) html += `<optgroup label="${g}">${groups[g].map(c => `<option value="${c.value}" ${c.value === selected ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</optgroup>`;
+  // 以前の細かい分類（AIサービス・家賃（按分）など）で登録してあるものは、そのまま選べるように残す
+  if (selected && !Core.isPickable(selected)) html += `<optgroup label="今までの分類"><option value="${attr(selected)}" selected>${esc(oldCatLabel(selected))}</option></optgroup>`;
+  for (const [g, list] of Core.PICK_GROUPS) html += `<optgroup label="${g}">${list.map(c => `<option value="${c.value}" ${c.value === selected ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</optgroup>`;
   return html + '</select>';
 }
+function oldCatLabel(v) { const c = Core.CAT[v]; return c ? `${c.label} → ${c.account}` : `${v}（以前の科目）`; }
 function methodSelect(id, list, selected, onchange) {
   const opts = list.slice();
   if (selected && !opts.includes(selected)) opts.push(selected);
@@ -1550,12 +1563,12 @@ const Entry = {
       }
       if (this.tab === 'inc') { $('f-type').value = it.type; ensureOption('f-recv', it.receive); $('f-recv').value = it.receive || '銀行振込'; if ($('f-kubun')) $('f-kubun').value = it.kubun || ''; }
       if (this.tab === 'kai') {
-        if (!Core.CAT[it.category]) ensureOption('f-kcat', it.category, it.category + '（以前の科目）'); $('f-kcat').value = it.category; ensureOption('f-pay', it.payment); $('f-pay').value = it.payment || 'クレジットカード';
+        ensureOption('f-kcat', it.category, Core.CAT[it.category] ? oldCatLabel(it.category) : it.category + '（以前の科目）'); $('f-kcat').value = it.category; ensureOption('f-pay', it.payment); $('f-pay').value = it.payment || 'クレジットカード';
         // すでに按分してある開業費は、按分前の金額と割合に戻して表示する
         const am = String(it.note || '').match(/(?:家事)?按分: [^¥\/]*¥([\d,]+) × ([\d.]+)%/);
         // 経費から移動したものは、元の科目（例：家賃（按分））を選んでおく
         const mv = String(it.note || '').match(/経費より移動: ([^\s\/]+)/);
-        if (mv && Core.CAT[mv[1]] && Core.accountOf(mv[1]) === Core.accountOf(it.category)) $('f-kcat').value = mv[1];
+        if (mv && Core.CAT[mv[1]] && Core.accountOf(mv[1]) === Core.accountOf(it.category)) { ensureOption('f-kcat', mv[1]); $('f-kcat').value = mv[1]; }
         if (am && this.cur === 'JPY') {
           $('f-amount').value = toNum(am[1]);
           const r = toNum(am[2]);
@@ -1615,17 +1628,22 @@ const Entry = {
     const cat = $('f-cat').value;
     const c = Core.CAT[cat];
     $('f-cat-hint').textContent = c ? c.hint : (cat ? 'この科目は決算書の「' + Core.accountOf(cat) + '」として集計します。' : '');
+    if (['地代家賃', '水道光熱費', '通信費'].includes(cat)) $('f-cat-hint').textContent = (c.hint ? c.hint + ' ' : '') + '自宅と共用なら、下の「事業で使う割合」で家事按分（面積・時間）を選んでください。';
     const def = Core.defaultRatioFor(cat, St.S);
     const sel = $('f-ratio-mode');
     let opts = '';
     if (def !== null) opts += `<option value="auto">家事按分の割合（${def}%）</option>`;
+    else opts += `<option value="area">家事按分：面積の割合（${Core.areaRatio(St.S) || '未設定'}%）― 家賃など</option><option value="time">家事按分：時間の割合（${Core.timeRatio(St.S) || '未設定'}%）― 電気・ネット・スマホ</option>`;
     opts += ['100', '80', '50', '30', '20'].map(v => `<option value="${v}">${v}%${v === '100' ? '（全額事業用）' : ''}</option>`).join('') + `<option value="custom">手入力</option>`;
     const prev = sel.value;
     sel.innerHTML = opts;
     const it = this.item;
     if (initial && it && this.tab === 'exp') {
       const r = it.ratio === '' ? 100 : toNum(it.ratio);
+      const noteHas = k => String(it.note || '').includes(k === 'area' ? '面積按分' : '時間按分');
       if (def !== null && r === def) sel.value = 'auto';
+      else if (def === null && r < 100 && r === Core.areaRatio(St.S) && noteHas('area')) sel.value = 'area';
+      else if (def === null && r < 100 && r === Core.timeRatio(St.S) && noteHas('time')) sel.value = 'time';
       else if (['100', '80', '50', '30', '20'].includes(String(r))) sel.value = String(r);
       else { sel.value = 'custom'; $('f-ratio').value = r; }
     } else sel.value = def !== null ? 'auto' : (prev && prev !== 'auto' && [...sel.options].some(o => o.value === prev) ? prev : '100');
@@ -1637,6 +1655,8 @@ const Entry = {
     const mode = $('f-ratio-mode') ? $('f-ratio-mode').value : '100';
     $('f-ratio').style.display = mode === 'custom' ? 'block' : 'none';
     if (mode === 'auto') return Core.defaultRatioFor($('f-cat').value, St.S) ?? 100;
+    if (mode === 'area') return Core.areaRatio(St.S) || 0;
+    if (mode === 'time') return Core.timeRatio(St.S) || 0;
     if (mode === 'custom') return toNum($('f-ratio').value);
     return toNum(mode);
   },
@@ -1666,7 +1686,9 @@ const Entry = {
       if (ratio < 100) {
         const s = St.S.anbun || {};
         const cat = Core.CAT[rec.category];
-        const why = $('f-ratio-mode').value === 'auto' && cat && cat.anbun === 'area' ? `面積按分: 仕事スペース${s.areaWork}㎡ ÷ 全体${s.areaTotal}㎡` : $('f-ratio-mode').value === 'auto' && cat && cat.anbun === 'time' ? `時間按分: 1日${s.timeHours}時間÷24時間 × 週${s.timeDays}日÷7日` : '';
+        const md = $('f-ratio-mode').value;
+        const kind = md === 'area' || md === 'time' ? md : md === 'auto' && cat ? ((St.S.anbunCats || {})[cat.value] ?? cat.anbun) : '';
+        const why = kind === 'area' ? `面積按分: 仕事スペース${s.areaWork}㎡ ÷ 全体${s.areaTotal}㎡` : kind === 'time' ? `時間按分: 1日${s.timeHours}時間÷24時間 × 週${s.timeDays}日÷7日` : '';
         const usdPart = this.cur === 'USD' ? (note.match(USD_RE) || [''])[0].replace(/\s*\/?\s*$/, '') : '';
         const rest = usdPart ? note.replace(USD_RE, '').trim() : note;
         rec.note = (usdPart ? usdPart + ' / ' : '') + `家事按分: ${fmt(amount)} × ${ratio}%${why ? '（' + why + '）' : ''}` + (rest ? ' / ' + rest : '');
@@ -1735,6 +1757,7 @@ const Entry = {
     if (!o.amount || o.amount <= 0) return '金額を入力してください';
     if (!o.memo) return '内容・摘要を入力してください';
     if ((this.tab === 'exp' || this.tab === 'kai') && !o.category) return '勘定科目を選んでください';
+    if (this.tab === 'exp' && ['area', 'time'].includes($('f-ratio-mode').value) && !(toNum(o.ratio) > 0)) return '家事按分の割合が未設定です。「🏡 家事按分」の画面で面積・時間を入れてください';
     if (this.cur === 'USD' && !toNum($('f-rate').value)) return '為替レートを入力してください';
     if (isLocked(o.date) || (this.item && isLocked(this.item.date))) return `${yearOf(o.date)}年は締め済みです。設定で締めを解除してください。`;
     return '';
@@ -1814,7 +1837,7 @@ const Entry = {
 };
 function ensureOption(id, value, label) {
   const sel = $(id); if (!sel || !value) return;
-  if (![...sel.options].some(o => o.value === value)) { const op = document.createElement('option'); op.value = value; op.textContent = label || value; sel.appendChild(op); }
+  if (![...sel.options].some(o => o.value === value)) { const op = document.createElement('option'); op.value = value; op.textContent = label || (Core.CAT[value] && /cat/.test(id) ? oldCatLabel(value) : value); sel.appendChild(op); }
 }
 
 PAGES.entry = () => { if (Entry._params !== St.params) { Entry._params = St.params; Entry.init(St.params); } return Entry.html(); };
@@ -2554,7 +2577,9 @@ PAGES.anbun = () => {
   // 今月の按分経費をまとめて登録
   const focus = St.params.focus, fdate = St.params.date;
   h += `<div class="card" id="ab-monthly"><h3>📅 按分する経費を登録 <span class="sub">請求額を入れて「登録」を押すだけ</span></h3>${cats.filter(c => Core.defaultRatioFor(c, S) !== null).map((c, i) => {
-    const last = St.DB.records.filter(r => r.category === c).sort((x, y) => y.date.localeCompare(x.date))[0];
+    // 勘定科目（地代家賃など）で按分して登録したものも「前回」として使う（同じ科目の按分項目が1つだけのとき）
+    const acc = Core.accountOf(c), uniq = cats.filter(x => Core.accountOf(x) === acc).length === 1;
+    const last = St.DB.records.filter(r => r.category === c || (uniq && r.category === acc && toNum(r.ratio) < 100 && String(r.note || '').includes('家事按分'))).sort((x, y) => y.date.localeCompare(x.date))[0];
     return `<div class="card" style="background:var(--surface2);box-shadow:none;margin-bottom:8px;${c === focus ? 'border-color:var(--primary2);border-width:2px' : ''}"><div class="between"><b>${esc(catLabel(c))}</b><span class="badge">${Core.defaultRatioFor(c, S)}%</span></div>
       <div class="form" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:8px"><div class="fg"><label>日付</label><input type="date" id="abm-d-${i}" value="${c === focus && fdate ? fdate : localToday()}"></div>
       <div class="fg"><label>請求額（円）</label><input type="number" id="abm-a-${i}" value="${last ? toNum(last.amount) : ''}" placeholder="金額" oninput="$('abm-p-${i}').textContent=this.value?'経費になる額 '+fmt(Core.calcAdjusted(this.value,${Core.defaultRatioFor(c, S)})):''">${last ? `<div class="hint">前回（${esc(last.date)}）と同じ金額を入れています。違うときは書き換えてください。</div>` : ''}</div>
